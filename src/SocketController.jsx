@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { Snackbar } from '@mui/material';
-import { devicesActions, sessionActions } from './store';
+import { devicesActions, errorsActions, geofencesActions, sessionActions } from './store';
 import { useCatchCallback, useAsyncTask } from './reactHelper';
 import { snackBarDurationLongMs } from './common/util/duration';
 import alarm from './resources/alarm.mp3';
@@ -14,6 +14,7 @@ import {
   nativePostMessage,
 } from './common/components/NativeInterface';
 import fetchOrThrow from './common/util/fetchOrThrow';
+import createRefreshScheduler from './common/util/refreshScheduler';
 
 const logoutCode = 4000;
 
@@ -35,6 +36,19 @@ const SocketController = () => {
 
   const socketRef = useRef();
   const reconnectTimeoutRef = useRef();
+
+  const geofenceRefreshScheduler = useMemo(
+    () =>
+      createRefreshScheduler({
+        load: async () => {
+          const response = await fetchOrThrow('/api/geofences');
+          return response.json();
+        },
+        apply: (geofences) => dispatch(geofencesActions.refresh(geofences)),
+        fail: (error) => dispatch(errorsActions.push(error.message)),
+      }),
+    [dispatch],
+  );
 
   const clearReconnectTimeout = useCallback(() => {
     if (reconnectTimeoutRef.current) {
@@ -91,6 +105,7 @@ const SocketController = () => {
 
     socket.onopen = () => {
       dispatch(sessionActions.updateSocket(true));
+      geofenceRefreshScheduler.schedule();
     };
 
     socket.onclose = async (event) => {
@@ -138,8 +153,11 @@ const SocketController = () => {
       if (data.logs) {
         dispatch(sessionActions.updateLogs(data.logs));
       }
+      if (data.invalidate?.includes('geofences')) {
+        geofenceRefreshScheduler.schedule();
+      }
     };
-  }, [clearReconnectTimeout, dispatch, navigate]);
+  }, [clearReconnectTimeout, dispatch, geofenceRefreshScheduler, navigate]);
 
   connectSocketRef.current = connectSocket;
 
@@ -156,12 +174,13 @@ const SocketController = () => {
         connectSocket();
         return () => {
           clearReconnectTimeout();
+          geofenceRefreshScheduler.cancel();
           socketRef.current?.close(logoutCode);
         };
       }
       return null;
     },
-    [authenticated, dispatch, clearReconnectTimeout, connectSocket],
+    [authenticated, dispatch, clearReconnectTimeout, connectSocket, geofenceRefreshScheduler],
   );
 
   const handleNativeNotification = useCatchCallback(
