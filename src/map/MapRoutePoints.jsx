@@ -8,7 +8,7 @@ import MapSpeedLegend from './control/MapSpeedLegend';
 const onMouseEnter = () => (map.getCanvas().style.cursor = 'pointer');
 const onMouseLeave = () => (map.getCanvas().style.cursor = '');
 
-const MapRoutePoints = ({ positions, onClick, showSpeedControl }) => {
+const MapRoutePoints = ({ positions, onClick, showSpeedControl, showPoints = true }) => {
   const onMarkerClick = useCallback(
     (event) => {
       event.preventDefault();
@@ -24,6 +24,7 @@ const MapRoutePoints = ({ positions, onClick, showSpeedControl }) => {
   const minSpeed = positions.reduce((a, p) => Math.min(a, p.speed), Infinity);
 
   useMapLayer({
+    enabled: showPoints,
     layers: [
       {
         type: 'symbol',
@@ -61,7 +62,7 @@ const MapRoutePoints = ({ positions, onClick, showSpeedControl }) => {
         },
       })),
     },
-    dataDeps: [positions],
+    dataDeps: [positions, showPoints],
   });
 
   return showSpeedControl ? <MapSpeedLegend positions={positions} /> : null;

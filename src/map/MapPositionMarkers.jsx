@@ -16,11 +16,13 @@ const MapPositionMarkers = ({
   selectedPosition,
   titleField,
   disabled,
+  disableClustering,
 }) => {
   const devices = useSelector((state) => state.devices.items);
   const selectedDeviceId = useSelector((state) => state.devices.selectedId);
 
-  const mapCluster = useAttributePreference('mapCluster', true);
+  const mapClusterPreference = useAttributePreference('mapCluster', true);
+  const mapCluster = disableClustering ? false : mapClusterPreference;
   const directionType = useAttributePreference('mapDirection', 'selected');
 
   const onMapClickCallback = useCallback(

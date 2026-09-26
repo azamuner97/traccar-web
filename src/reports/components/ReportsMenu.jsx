@@ -32,7 +32,7 @@ const ReportsMenu = () => {
       return path;
     }
     const params = new URLSearchParams();
-    if (path === '/reports/chart' || path === '/reports/route' || path === '/replay') {
+    if (path === '/reports/chart' || path === '/reports/route') {
       const [firstDeviceId] = deviceIds;
       if (firstDeviceId != null) {
         params.append('deviceId', firstDeviceId);

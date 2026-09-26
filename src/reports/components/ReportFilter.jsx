@@ -27,7 +27,16 @@ export const updateReportParams = (searchParams, setSearchParams, key, values) =
   setSearchParams(newParams, { replace: true });
 };
 
-const ReportFilter = ({ children, onShow, onExport, onSchedule, deviceType, loading, formats }) => {
+const ReportFilter = ({
+  children,
+  onShow,
+  onExport,
+  onSchedule,
+  deviceType,
+  loading,
+  formats,
+  periodLimit,
+}) => {
   const { classes } = useReportStyles();
   const t = useTranslation();
 
@@ -138,6 +147,10 @@ const ReportFilter = ({ children, onShow, onExport, onSchedule, deviceType, load
         break;
     }
 
+    if (period !== 'custom' && periodLimit && selectedTo.diff(selectedFrom) > periodLimit) {
+      selectedTo = selectedFrom.add(periodLimit, 'millisecond');
+    }
+
     const newParams = new URLSearchParams(searchParams);
     newParams.set('from', selectedFrom.toISOString());
     newParams.set('to', selectedTo.toISOString());
@@ -222,6 +235,7 @@ const ReportFilter = ({ children, onShow, onExport, onSchedule, deviceType, load
             }}
             multiple
             singleLine
+            shrinkLabel
             fullWidth
           />
         </div>
@@ -238,10 +252,14 @@ const ReportFilter = ({ children, onShow, onExport, onSchedule, deviceType, load
               >
                 <MenuItem value="today">{t('reportToday')}</MenuItem>
                 <MenuItem value="yesterday">{t('reportYesterday')}</MenuItem>
-                <MenuItem value="thisWeek">{t('reportThisWeek')}</MenuItem>
-                <MenuItem value="previousWeek">{t('reportPreviousWeek')}</MenuItem>
-                <MenuItem value="thisMonth">{t('reportThisMonth')}</MenuItem>
-                <MenuItem value="previousMonth">{t('reportPreviousMonth')}</MenuItem>
+                {!periodLimit && <MenuItem value="thisWeek">{t('reportThisWeek')}</MenuItem>}
+                {!periodLimit && (
+                  <MenuItem value="previousWeek">{t('reportPreviousWeek')}</MenuItem>
+                )}
+                {!periodLimit && <MenuItem value="thisMonth">{t('reportThisMonth')}</MenuItem>}
+                {!periodLimit && (
+                  <MenuItem value="previousMonth">{t('reportPreviousMonth')}</MenuItem>
+                )}
                 <MenuItem value="custom">{t('reportCustom')}</MenuItem>
               </Select>
             </FormControl>

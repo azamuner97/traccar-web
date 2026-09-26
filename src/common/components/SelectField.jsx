@@ -37,6 +37,7 @@ const SelectField = ({
   placeholder,
   singleLine,
   allValue,
+  shrinkLabel = false,
 }) => {
   const { classes } = useStyles();
   const [items, setItems] = useState();
@@ -136,6 +137,7 @@ const SelectField = ({
               inputLabel: {
                 ...params.slotProps?.inputLabel,
                 shrink:
+                  shrinkLabel ||
                   (multiple && !autocompleteValue.length && Boolean(placeholder)) ||
                   params.slotProps?.inputLabel?.shrink,
               },

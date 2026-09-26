@@ -37,7 +37,7 @@ import { useCatch, useCatchCallback } from '../../reactHelper';
 import { useAttributePreference } from '../util/preferences';
 import fetchOrThrow from '../util/fetchOrThrow';
 
-const useStyles = makeStyles()((theme, { desktopPadding }) => ({
+const useStyles = makeStyles()((theme, { desktopPadding, bottomOffset = 0 }) => ({
   card: {
     pointerEvents: 'auto',
     width: theme.dimensions.popupMaxWidth,
@@ -89,11 +89,11 @@ const useStyles = makeStyles()((theme, { desktopPadding }) => ({
     left: '50%',
     [theme.breakpoints.up('md')]: {
       left: `calc(50% + ${desktopPadding} / 2)`,
-      bottom: theme.spacing(3),
+      bottom: `calc(${theme.spacing(3)} + ${bottomOffset}px)`,
     },
     [theme.breakpoints.down('md')]: {
       left: '50%',
-      bottom: `calc(${theme.spacing(3)} + ${theme.dimensions.bottomBarHeight}px)`,
+      bottom: `calc(${theme.spacing(3)} + ${theme.dimensions.bottomBarHeight}px + ${bottomOffset}px)`,
     },
     transform: 'translateX(-50%)',
   },
@@ -116,8 +116,15 @@ const StatusRow = ({ name, content }) => {
   );
 };
 
-const StatusCard = ({ deviceId, position, onClose, disableActions, desktopPadding = 0 }) => {
-  const { classes } = useStyles({ desktopPadding });
+const StatusCard = ({
+  deviceId,
+  position,
+  onClose,
+  disableActions,
+  desktopPadding = 0,
+  bottomOffset = 0,
+}) => {
+  const { classes } = useStyles({ desktopPadding, bottomOffset });
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const t = useTranslation();
