@@ -3,7 +3,7 @@ const ROLE_NUMBER_ATTRIBUTE = 'traccarToolRoleNumber';
 
 export const roleMarkerRoles = ['player', 'supporter', 'hunter'];
 
-const normalizePositiveInteger = (value) => {
+export const normalizePositiveInteger = (value) => {
   if (typeof value === 'number') {
     return Number.isSafeInteger(value) && value > 0 ? String(value) : null;
   }

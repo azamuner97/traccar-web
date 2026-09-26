@@ -54,7 +54,7 @@ const MainMap = ({ filteredPositions, selectedPosition, onEventsClick }) => {
           disabled={rulerActive}
         />
         <MapDefaultCamera filteredPositions={filteredPositions} />
-        <MapSelectedDevice />
+        {selectedPosition && <MapSelectedDevice />}
         <PoiMap />
         <MapRuler positions={filteredPositions} onActiveChange={setRulerActive} />
         {!features.disableEvents && (

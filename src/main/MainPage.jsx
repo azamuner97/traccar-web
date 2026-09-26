@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useCallback, useEffect } from 'react';
+import { lazy, Suspense, useState, useCallback, useEffect, useMemo } from 'react';
 import { Paper } from '@mui/material';
 import { makeStyles } from 'tss-react/mui';
 import { useTheme } from '@mui/material/styles';
@@ -7,12 +7,13 @@ import { useDispatch, useSelector } from 'react-redux';
 import DeviceList from './DeviceList';
 import BottomMenu from '../common/components/BottomMenu';
 import StatusCard from '../common/components/StatusCard';
-import { devicesActions } from '../store';
+import { devicesActions, sessionActions } from '../store';
 import usePersistedState from '../common/util/usePersistedState';
 import EventsDrawer from './EventsDrawer';
 import useFilter from './useFilter';
 import MainToolbar from './MainToolbar';
 import { useAttributePreference } from '../common/util/preferences';
+import { filterLiveDevices, shouldClearSelectedDevice } from './gameState';
 
 const MainMap = lazy(() => import('./MainMap'));
 
@@ -74,7 +75,16 @@ const MainPage = () => {
   const mapOnSelect = useAttributePreference('mapOnSelect', true);
 
   const selectedDeviceId = useSelector((state) => state.devices.selectedId);
+  const devices = useSelector((state) => state.devices.items);
+  const gameStateIds = useSelector((state) => state.devices.gameStateIds);
+  const user = useSelector((state) => state.session.user);
   const positions = useSelector((state) => state.session.positions);
+  const filter = useSelector((state) => state.session.liveFilter);
+  const filterMap = useSelector((state) => state.session.liveFilterMap);
+  const visibleDevices = useMemo(
+    () => filterLiveDevices(devices, positions, gameStateIds, user),
+    [devices, positions, gameStateIds, user],
+  );
   const [filteredPositions, setFilteredPositions] = useState([]);
   const selectedPosition = filteredPositions.find(
     (position) => selectedDeviceId && position.deviceId === selectedDeviceId,
@@ -83,13 +93,15 @@ const MainPage = () => {
   const [filteredDevices, setFilteredDevices] = useState([]);
 
   const [keyword, setKeyword] = useState('');
-  const [filter, setFilter] = usePersistedState('deviceFilter', {
-    statuses: [],
-    groups: [],
-    geofences: [],
-  });
   const [filterSort, setFilterSort] = usePersistedState('filterSort', '');
-  const [filterMap, setFilterMap] = usePersistedState('filterMap', false);
+  const setFilter = useCallback(
+    (value) => dispatch(sessionActions.updateLiveFilter(value)),
+    [dispatch],
+  );
+  const setFilterMap = useCallback(
+    (value) => dispatch(sessionActions.updateLiveFilterMap(value)),
+    [dispatch],
+  );
 
   const [devicesOpen, setDevicesOpen] = useState(desktop);
   const [eventsOpen, setEventsOpen] = useState(false);
@@ -97,10 +109,21 @@ const MainPage = () => {
   const onEventsClick = useCallback(() => setEventsOpen(true), [setEventsOpen]);
 
   useEffect(() => {
+    window.localStorage.removeItem('deviceFilter');
+    window.localStorage.removeItem('filterMap');
+  }, []);
+
+  useEffect(() => {
     if (!desktop && mapOnSelect && selectedDeviceId) {
       setDevicesOpen(false);
     }
   }, [desktop, mapOnSelect, selectedDeviceId]);
+
+  useEffect(() => {
+    if (shouldClearSelectedDevice(selectedDeviceId, visibleDevices)) {
+      dispatch(devicesActions.selectId(null));
+    }
+  }, [dispatch, selectedDeviceId, visibleDevices]);
 
   useFilter(
     keyword,
@@ -108,6 +131,7 @@ const MainPage = () => {
     filterSort,
     filterMap,
     positions,
+    visibleDevices,
     setFilteredDevices,
     setFilteredPositions,
   );
@@ -127,6 +151,7 @@ const MainPage = () => {
         <Paper square elevation={3} className={classes.header}>
           <MainToolbar
             filteredDevices={filteredDevices}
+            devices={visibleDevices}
             devicesOpen={devicesOpen}
             setDevicesOpen={setDevicesOpen}
             keyword={keyword}
@@ -166,7 +191,7 @@ const MainPage = () => {
         )}
       </div>
       <EventsDrawer open={eventsOpen} onClose={() => setEventsOpen(false)} />
-      {selectedDeviceId && (
+      {selectedDeviceId && selectedPosition && (
         <StatusCard
           deviceId={selectedDeviceId}
           position={selectedPosition}

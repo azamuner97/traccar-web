@@ -45,6 +45,7 @@ const useStyles = makeStyles()((theme) => ({
 
 const MainToolbar = ({
   filteredDevices,
+  devices,
   devicesOpen,
   setDevicesOpen,
   keyword,
@@ -64,7 +65,6 @@ const MainToolbar = ({
   const deviceReadonly = useDeviceReadonly();
 
   const groups = useSelector((state) => state.groups.items);
-  const devices = useSelector((state) => state.devices.items);
   const devicesLoaded = useSelector((state) => state.devices.loaded);
   const geofences = useSelector((state) => state.geofences.items);
 

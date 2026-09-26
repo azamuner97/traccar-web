@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import dayjs from 'dayjs';
+import { filterLivePositions } from './gameState';
 
 export default (
   keyword,
@@ -8,11 +9,11 @@ export default (
   filterSort,
   filterMap,
   positions,
+  devices,
   setFilteredDevices,
   setFilteredPositions,
 ) => {
   const groups = useSelector((state) => state.groups.items);
-  const devices = useSelector((state) => state.devices.items);
 
   useEffect(() => {
     const deviceGroups = (device) => {
@@ -60,7 +61,7 @@ export default (
     setFilteredPositions(
       filterMap
         ? filtered.map((device) => positions[device.id]).filter(Boolean)
-        : Object.values(positions),
+        : filterLivePositions(positions, devices),
     );
   }, [
     keyword,

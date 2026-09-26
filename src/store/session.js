@@ -1,5 +1,11 @@
 import { createSlice } from '@reduxjs/toolkit';
 
+const defaultLiveFilter = () => ({
+  statuses: [],
+  groups: [],
+  geofences: [],
+});
+
 const { reducer, actions } = createSlice({
   name: 'session',
   initialState: {
@@ -10,13 +16,27 @@ const { reducer, actions } = createSlice({
     logs: [],
     positions: {},
     history: {},
+    liveFilter: defaultLiveFilter(),
+    liveFilterMap: false,
   },
   reducers: {
     updateServer(state, action) {
       state.server = action.payload;
     },
     updateUser(state, action) {
+      const currentUserId = state.user?.id ?? null;
+      const nextUserId = action.payload?.id ?? null;
       state.user = action.payload;
+      if (currentUserId !== nextUserId) {
+        state.liveFilter = defaultLiveFilter();
+        state.liveFilterMap = false;
+      }
+    },
+    updateLiveFilter(state, action) {
+      state.liveFilter = action.payload;
+    },
+    updateLiveFilterMap(state, action) {
+      state.liveFilterMap = action.payload;
     },
     updateSocket(state, action) {
       state.socket = action.payload;

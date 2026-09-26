@@ -7,7 +7,6 @@ import { toMapCoordinates } from '../core/mapUtil';
 
 const MapDefaultCamera = ({ filteredPositions }) => {
   const selectedDeviceId = useSelector((state) => state.devices.selectedId);
-  const positions = useSelector((state) => state.session.positions);
 
   const defaultLatitude = usePreference('latitude');
   const defaultLongitude = usePreference('longitude');
@@ -17,15 +16,15 @@ const MapDefaultCamera = ({ filteredPositions }) => {
 
   useEffect(() => {
     if (initialized) return;
-    if (selectedDeviceId) {
-      const position = positions[selectedDeviceId];
-      if (position) {
-        map.jumpTo({
-          center: toMapCoordinates(position.longitude, position.latitude),
-          zoom: Math.max(defaultZoom > 0 ? defaultZoom : map.getZoom(), 10),
-        });
-        setInitialized(true);
-      }
+    const selectedPosition = filteredPositions.find(
+      (position) => position.deviceId === selectedDeviceId,
+    );
+    if (selectedPosition) {
+      map.jumpTo({
+        center: toMapCoordinates(selectedPosition.longitude, selectedPosition.latitude),
+        zoom: Math.max(defaultZoom > 0 ? defaultZoom : map.getZoom(), 10),
+      });
+      setInitialized(true);
     } else {
       if (defaultLatitude && defaultLongitude) {
         map.jumpTo({
@@ -34,7 +33,7 @@ const MapDefaultCamera = ({ filteredPositions }) => {
         });
         setInitialized(true);
       } else {
-        const coordinates = (filteredPositions || Object.values(positions)).map((item) =>
+        const coordinates = filteredPositions.map((item) =>
           toMapCoordinates(item.longitude, item.latitude),
         );
         if (coordinates.length > 1) {
@@ -64,7 +63,6 @@ const MapDefaultCamera = ({ filteredPositions }) => {
     defaultLatitude,
     defaultLongitude,
     defaultZoom,
-    positions,
     filteredPositions,
   ]);
 

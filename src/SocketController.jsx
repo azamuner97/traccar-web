@@ -108,7 +108,10 @@ const SocketController = () => {
           dispatch(sessionActions.updatePositions(await positionsResponse.json()));
         }
         if (devicesResponse.status === 401 || positionsResponse.status === 401) {
+          clearReconnectTimeout();
+          dispatch(sessionActions.updateUser(null));
           navigate('/login');
+          return;
         }
       } catch {
         // ignore errors
