@@ -19,7 +19,7 @@ export const normalizePositiveInteger = (value) => {
 };
 
 export const roleNumberTextSize = (number) =>
-  Math.max(6, Math.round(15 - Math.max(0, String(number).length - 1) * 1.5));
+  Math.max(9, 20 - Math.max(0, String(number).length - 1) * 2);
 
 export const resolveRoleMarker = (device) => {
   const attributes = device?.attributes || {};

@@ -17,7 +17,7 @@ test('resolves every supported role from the new attribute contract', () => {
       role,
       number: '7',
       image: `role-${role}`,
-      textSize: 15,
+      textSize: 20,
     });
   }
 });
@@ -41,7 +41,9 @@ test('rejects invalid roles and non-positive whole numbers', () => {
 });
 
 test('scales longer labels down without becoming unreadably small', () => {
-  assert.equal(roleNumberTextSize('1'), 15);
+  assert.equal(roleNumberTextSize('1'), 20);
+  assert.equal(roleNumberTextSize('12'), 18);
+  assert.equal(roleNumberTextSize('123'), 16);
   assert.ok(roleNumberTextSize('123') < roleNumberTextSize('1'));
-  assert.equal(roleNumberTextSize('123456789'), 6);
+  assert.equal(roleNumberTextSize('123456789'), 9);
 });
