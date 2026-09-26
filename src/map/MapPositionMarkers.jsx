@@ -6,6 +6,7 @@ import { formatTime, getStatusColor } from '../common/util/formatter';
 import { mapIconKey } from './core/preloadImages';
 import { useAttributePreference } from '../common/util/preferences';
 import { fromMapCoordinates } from './core/mapUtil';
+import { resolveRoleMarker } from './roleMarkerUtils';
 
 const MapPositionMarkers = ({
   positions,
@@ -54,16 +55,22 @@ const MapPositionMarkers = ({
     const color = showStatus
       ? position.attributes.color || getStatusColor(device.status)
       : 'neutral';
+    const roleMarker = resolveRoleMarker(device);
     const titles = { name: device.name, fixTime: formatTime(position.fixTime, 'seconds') };
     return {
       id: position.id,
       deviceId: position.deviceId,
       latitude: position.latitude,
       longitude: position.longitude,
-      image: `${mapIconKey(device.category)}-${color}`,
+      image: roleMarker?.image || `${mapIconKey(device.category)}-${color}`,
       title: titles[titleField || 'name'],
       rotation: position.course,
       direction: showDirection,
+      ...(roleMarker && {
+        roleNumber: roleMarker.number,
+        roleNumberSize: roleMarker.textSize,
+        statusColor: color,
+      }),
     };
   };
 

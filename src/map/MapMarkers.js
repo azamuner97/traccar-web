@@ -67,6 +67,33 @@ const MapMarkers = ({ markers, showTitles, cluster, direction, onClick, disabled
     },
   ];
 
+  layers.push({
+    key: 'role-number',
+    type: 'symbol',
+    filter: ['all', ['!has', 'point_count'], ['has', 'roleNumber']],
+    layout: {
+      'text-field': ['get', 'roleNumber'],
+      'text-size': ['*', ['get', 'roleNumberSize'], iconScale],
+      'text-font': findFonts(map),
+      'text-allow-overlap': true,
+      'text-ignore-placement': true,
+      'symbol-sort-key': ['get', 'id'],
+    },
+    paint: {
+      'text-color': [
+        'match',
+        ['get', 'statusColor'],
+        'info',
+        theme.palette.info.main,
+        'success',
+        theme.palette.success.main,
+        'error',
+        theme.palette.error.main,
+        theme.palette.neutral.main,
+      ],
+    },
+  });
+
   if (direction) {
     layers.push({
       key: 'direction',
@@ -101,7 +128,18 @@ const MapMarkers = ({ markers, showTitles, cluster, direction, onClick, disabled
   useMapLayer({
     source: cluster ? { cluster: true, clusterMaxZoom: 14, clusterRadius: 50 } : undefined,
     layers,
-    layersDeps: [showTitles, cluster, direction, iconScale, onMarkerClick, onClusterClick],
+    layersDeps: [
+      showTitles,
+      cluster,
+      direction,
+      iconScale,
+      onMarkerClick,
+      onClusterClick,
+      theme.palette.info.main,
+      theme.palette.success.main,
+      theme.palette.error.main,
+      theme.palette.neutral.main,
+    ],
     data: {
       type: 'FeatureCollection',
       features: markers.map(

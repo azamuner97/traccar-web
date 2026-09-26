@@ -4,6 +4,9 @@ import { loadImage, prepareIcon } from './mapUtil';
 
 import directionSvg from '../../resources/images/direction.svg';
 import backgroundSvg from '../../resources/images/background.svg';
+import playerBackgroundSvg from '../../resources/images/background-player.svg';
+import supporterBackgroundSvg from '../../resources/images/background-supporter.svg';
+import hunterBackgroundSvg from '../../resources/images/background-hunter.svg';
 import animalSvg from '@material-symbols/svg-600/outlined/pets.svg';
 import bicycleSvg from '@material-symbols/svg-600/outlined/directions_bike.svg';
 import boatSvg from '@material-symbols/svg-600/outlined/sailing.svg';
@@ -69,6 +72,12 @@ export const mapIcons = {
   van: vanSvg,
 };
 
+export const roleBackgrounds = {
+  player: playerBackgroundSvg,
+  supporter: supporterBackgroundSvg,
+  hunter: hunterBackgroundSvg,
+};
+
 export const mapIconKey = (category) => {
   switch (category) {
     case 'offroad':
@@ -122,6 +131,11 @@ export default async () => {
   const background = await loadImage(backgroundSvg);
   mapImages.background = await prepareIcon(background);
   mapImages.direction = await prepareIcon(await loadImage(directionSvg));
+  await Promise.all(
+    Object.entries(roleBackgrounds).map(async ([role, image]) => {
+      mapImages[`role-${role}`] = prepareIcon(await loadImage(image));
+    }),
+  );
   await Promise.all(
     Object.keys(mapIcons).map(async (key) => {
       const results = [];

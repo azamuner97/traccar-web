@@ -34,6 +34,8 @@ import { useAttributePreference } from '../common/util/preferences';
 import GeofencesValue from '../common/components/GeofencesValue';
 import DriverValue from '../common/components/DriverValue';
 import MotionBar from './components/MotionBar';
+import RoleBadge from './components/RoleBadge';
+import { resolveRoleMarker } from '../map/roleMarkerUtils';
 
 dayjs.extend(relativeTime);
 
@@ -63,6 +65,9 @@ const useStyles = makeStyles()((theme) => ({
   selected: {
     backgroundColor: theme.palette.action.selected,
   },
+  roleAvatar: {
+    backgroundColor: 'transparent',
+  },
 }));
 
 const DeviceRow = ({ devices, index, style }) => {
@@ -75,6 +80,7 @@ const DeviceRow = ({ devices, index, style }) => {
 
   const item = devices[index];
   const position = useSelector((state) => state.session.positions[item.id]);
+  const roleMarker = resolveRoleMarker(item);
 
   const devicePrimary = useAttributePreference('devicePrimary', 'name');
   const deviceSecondary = useAttributePreference('deviceSecondary', '');
@@ -127,8 +133,12 @@ const DeviceRow = ({ devices, index, style }) => {
         className={selectedDeviceId === item.id ? classes.selected : null}
       >
         <ListItemAvatar>
-          <Avatar>
-            <img className={classes.icon} src={mapIcons[mapIconKey(item.category)]} alt="" />
+          <Avatar className={roleMarker ? classes.roleAvatar : undefined}>
+            {roleMarker ? (
+              <RoleBadge marker={roleMarker} status={item.status} />
+            ) : (
+              <img className={classes.icon} src={mapIcons[mapIconKey(item.category)]} alt="" />
+            )}
           </Avatar>
         </ListItemAvatar>
         <ListItemText
