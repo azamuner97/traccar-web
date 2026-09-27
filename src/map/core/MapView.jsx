@@ -11,6 +11,7 @@ import usePersistedState from '../../common/util/usePersistedState';
 import { mapImages } from './preloadImages';
 import useMapStyles from './useMapStyles';
 import { useAsyncTask } from '../../reactHelper';
+import MapCoordinates from '../control/MapCoordinates';
 
 const element = document.createElement('div');
 element.style.width = '100%';
@@ -149,6 +150,7 @@ const MapView = ({ children }) => {
   return (
     <div style={{ width: '100%', height: '100%' }} ref={containerRef}>
       <MapSwitcher styles={styles} selectedId={selectedStyleId} onSelect={setSelectedStyleId} />
+      {mapReady && <MapCoordinates />}
       {mapReady && children}
     </div>
   );
