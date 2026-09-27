@@ -11,6 +11,7 @@ import {
   clampReplayTime,
   findPositionAtOrBefore,
   getReplaySnapshot,
+  getReplayTimeRange,
   parseReplaySpeed,
   resolveReplayDeviceIds,
   validateReplayDeviceIds,
@@ -117,6 +118,54 @@ test('builds sorted tracks and ignores invalid or out-of-range positions', () =>
     tracks.get(2).map((position) => position.id),
     [3],
   );
+});
+
+test('derives the shared replay range from normalized datapoints', () => {
+  const requestedFrom = Date.UTC(2026, 0, 1, 10);
+  const tracks = buildReplayTracks(
+    [
+      {
+        id: 1,
+        deviceId: 1,
+        fixTime: iso(requestedFrom + 40_000),
+        latitude: 1,
+        longitude: 1,
+      },
+      {
+        id: 2,
+        deviceId: 2,
+        fixTime: iso(requestedFrom + 10_000),
+        latitude: 2,
+        longitude: 2,
+      },
+      {
+        id: 3,
+        deviceId: 2,
+        fixTime: iso(requestedFrom + 50_000),
+        latitude: 3,
+        longitude: 3,
+      },
+    ],
+    requestedFrom,
+    requestedFrom + 60_000,
+    [1, 2],
+  );
+
+  assert.deepEqual(getReplayTimeRange([...tracks.values()].flat()), {
+    fromTime: requestedFrom + 10_000,
+    toTime: requestedFrom + 50_000,
+  });
+});
+
+test('handles single-timestamp and empty replay ranges', () => {
+  const replayTime = Date.UTC(2026, 0, 1, 10);
+
+  assert.deepEqual(getReplayTimeRange([{ _replayTime: replayTime }]), {
+    fromTime: replayTime,
+    toTime: replayTime,
+  });
+  assert.equal(getReplayTimeRange([]), null);
+  assert.equal(getReplayTimeRange([{ _replayTime: Number.NaN }]), null);
 });
 
 test('uses the latest fix at or before the shared replay time', () => {

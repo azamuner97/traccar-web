@@ -43,6 +43,7 @@ import {
   clampReplayTime,
   clearReplayPeriod,
   getReplaySnapshot,
+  getReplayTimeRange,
   parseReplaySpeed,
   resolveReplayDeviceIds,
   validateReplayDeviceIds,
@@ -111,6 +112,13 @@ const useStyles = makeStyles()((theme) => ({
   slider: {
     flexGrow: 1,
     minWidth: theme.spacing(12),
+  },
+  staticTimeline: {
+    flexGrow: 1,
+    minWidth: theme.spacing(12),
+    height: theme.spacing(0.5),
+    borderRadius: theme.spacing(0.25),
+    backgroundColor: theme.palette.action.disabledBackground,
   },
   currentTimestamp: {
     display: 'flex',
@@ -323,15 +331,16 @@ const ReplayPage = () => {
           resolvedDeviceIds,
         );
         const nextPositions = [...nextTracks.values()].flat();
-        if (!nextPositions.length) {
+        const replayRange = getReplayTimeRange(nextPositions);
+        if (!replayRange) {
           throw Error(t('sharedNoData'));
         }
 
-        currentTimeRef.current = range.fromTime;
+        currentTimeRef.current = replayRange.fromTime;
         speedRef.current = 1;
-        setFromTime(range.fromTime);
-        setToTime(range.toTime);
-        setCurrentTime(range.fromTime);
+        setFromTime(replayRange.fromTime);
+        setToTime(replayRange.toTime);
+        setCurrentTime(replayRange.fromTime);
         setSpeed(1);
         setSpeedInput('1');
         setTracks(nextTracks);
@@ -488,14 +497,18 @@ const ReplayPage = () => {
             <Typography className={classes.timelineLabel} variant="body2">
               {formatTime(fromTime, 'time')}
             </Typography>
-            <Slider
-              className={classes.slider}
-              min={fromTime}
-              max={toTime}
-              step={1000}
-              value={currentTime}
-              onChange={(_, value) => seekTo(value)}
-            />
+            {fromTime < toTime ? (
+              <Slider
+                className={classes.slider}
+                min={fromTime}
+                max={toTime}
+                step={1000}
+                value={currentTime}
+                onChange={(_, value) => seekTo(value)}
+              />
+            ) : (
+              <div className={classes.staticTimeline} aria-hidden />
+            )}
             <Typography className={classes.timelineLabel} variant="body2" align="right">
               {formatTime(toTime, 'time')}
             </Typography>

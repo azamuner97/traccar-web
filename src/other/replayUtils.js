@@ -145,6 +145,21 @@ export const buildReplayTracks = (positions, fromTime, toTime, deviceIds) => {
   return new Map([...tracks].sort(([first], [second]) => first - second));
 };
 
+export const getReplayTimeRange = (positions) => {
+  let fromTime = Infinity;
+  let toTime = -Infinity;
+
+  positions.forEach((position) => {
+    const replayTime = position?._replayTime;
+    if (Number.isFinite(replayTime)) {
+      fromTime = Math.min(fromTime, replayTime);
+      toTime = Math.max(toTime, replayTime);
+    }
+  });
+
+  return Number.isFinite(fromTime) ? { fromTime, toTime } : null;
+};
+
 export const findPositionAtOrBefore = (track, replayTime) => {
   let lower = 0;
   let upper = track.length - 1;
