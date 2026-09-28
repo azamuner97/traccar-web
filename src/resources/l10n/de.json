@@ -659,5 +659,22 @@
     "categoryVan": "Van",
     "categoryScooter": "Roller",
     "maintenanceStart": "Start",
-    "maintenancePeriod": "Periode"
+    "maintenancePeriod": "Periode",
+    "mapDrawingShow": "Kartenzeichnungen anzeigen",
+    "mapDrawingHide": "Kartenzeichnungen ausblenden",
+    "mapDrawingEdit": "Zeichnungen bearbeiten",
+    "mapDrawingLine": "Linie zeichnen",
+    "mapDrawingArrow": "Pfeil zeichnen",
+    "mapDrawingPolygon": "Polygon zeichnen",
+    "mapDrawingRectangle": "Rechteck zeichnen",
+    "mapDrawingCircle": "Kreis zeichnen",
+    "mapDrawingText": "Text hinzufügen",
+    "mapDrawingEditText": "Text bearbeiten",
+    "mapDrawingColor": "Zeichnungsfarbe",
+    "mapDrawingDelete": "Zeichnung löschen",
+    "mapDrawingDeleteOther": "Zeichnung eines anderen Benutzers löschen",
+    "mapDrawingDeleteConfirm": "Diese Zeichnung löschen?",
+    "mapDrawingDeleteOtherConfirm": "Diese Zeichnung eines anderen Benutzers löschen?",
+    "mapDrawingOwner": "Eigentümer",
+    "userEnableMapDrawing": "Kartenzeichnungen aktivieren"
 }

@@ -36,6 +36,8 @@
     "recharts": "^3.10.1",
     "stylis": "^4.4.0",
     "stylis-plugin-rtl": "^2.1.1",
+    "terra-draw": "1.35.0",
+    "terra-draw-maplibre-gl-adapter": "1.4.1",
     "tss-react": "^4.9.21",
     "wellknown": "^0.5.0"
   },

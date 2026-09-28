@@ -25,7 +25,7 @@ const useStyles = makeStyles()(() => ({
   },
 }));
 
-const MapRuler = ({ positions, onActiveChange }) => {
+const MapRuler = ({ positions, active, onActiveChange }) => {
   const theme = useTheme();
   const t = useTranslation();
   const distanceUnit = useAttributePreference('distanceUnit');
@@ -40,7 +40,6 @@ const MapRuler = ({ positions, onActiveChange }) => {
   useEffect(() => {
     const color = theme.palette.geometry.main;
     const points = [];
-    let active = false;
     let button;
 
     map.addSource('ruler', {
@@ -117,16 +116,7 @@ const MapRuler = ({ positions, onActiveChange }) => {
     };
 
     const toggle = () => {
-      active = !active;
-      button.classList.toggle('active', active);
-      onActiveChangeRef.current(active);
-      if (active) {
-        map.on('click', onClick);
-      } else {
-        map.off('click', onClick);
-        points.length = 0;
-        render();
-      }
+      onActiveChangeRef.current(!active);
     };
 
     let container;
@@ -138,7 +128,7 @@ const MapRuler = ({ positions, onActiveChange }) => {
         button = document.createElement('button');
         button.type = 'button';
         button.title = t('sharedDistance');
-        button.className = `maplibregl-ctrl-icon ${classes.button}`;
+        button.className = `maplibregl-ctrl-icon ${classes.button}${active ? ' active' : ''}`;
         button.onclick = toggle;
         container.appendChild(button);
         root = createRoot(button);
@@ -151,11 +141,13 @@ const MapRuler = ({ positions, onActiveChange }) => {
       },
     };
     map.addControl(control, theme.direction === 'rtl' ? 'top-left' : 'top-right');
+    if (active) {
+      map.on('click', onClick);
+    }
 
     return () => {
       if (active) {
         map.off('click', onClick);
-        onActiveChangeRef.current(false);
       }
       map.removeControl(control);
       ['ruler-label', 'ruler-point', 'ruler-line'].forEach((id) => {
@@ -167,7 +159,7 @@ const MapRuler = ({ positions, onActiveChange }) => {
         map.removeSource('ruler');
       }
     };
-  }, [theme, t, distanceUnit, classes.button]);
+  }, [theme, t, distanceUnit, classes.button, active]);
 
   return null;
 };

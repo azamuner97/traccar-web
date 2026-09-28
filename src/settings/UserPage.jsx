@@ -445,6 +445,17 @@ const UserPage = () => {
                   label={t('userDisableReports')}
                   disabled={!manager}
                 />
+                {admin && (
+                  <FormControlLabel
+                    control={
+                      <Checkbox
+                        checked={!item.disableDrawings}
+                        onChange={(e) => setItem({ ...item, disableDrawings: !e.target.checked })}
+                      />
+                    }
+                    label={t('userEnableMapDrawing')}
+                  />
+                )}
                 <FormControlLabel
                   control={
                     <Checkbox

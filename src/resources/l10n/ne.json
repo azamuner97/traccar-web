@@ -659,5 +659,22 @@
     "categoryVan": "भ्यान ",
     "categoryScooter": "स्कुटर",
     "maintenanceStart": "शुरु",
-    "maintenancePeriod": "अवधि"
+    "maintenancePeriod": "अवधि",
+    "mapDrawingShow": "Show map drawings",
+    "mapDrawingHide": "Hide map drawings",
+    "mapDrawingEdit": "Edit drawings",
+    "mapDrawingLine": "Draw line",
+    "mapDrawingArrow": "Draw arrow",
+    "mapDrawingPolygon": "Draw polygon",
+    "mapDrawingRectangle": "Draw rectangle",
+    "mapDrawingCircle": "Draw circle",
+    "mapDrawingText": "Add text",
+    "mapDrawingEditText": "Edit text",
+    "mapDrawingColor": "Drawing color",
+    "mapDrawingDelete": "Delete drawing",
+    "mapDrawingDeleteOther": "Delete another user’s drawing",
+    "mapDrawingDeleteConfirm": "Delete this drawing?",
+    "mapDrawingDeleteOtherConfirm": "Delete this other user’s drawing?",
+    "mapDrawingOwner": "Owner",
+    "userEnableMapDrawing": "Enable map drawing"
 }

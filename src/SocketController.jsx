@@ -2,7 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { Snackbar } from '@mui/material';
-import { devicesActions, errorsActions, geofencesActions, sessionActions } from './store';
+import {
+  devicesActions,
+  drawingsActions,
+  errorsActions,
+  geofencesActions,
+  sessionActions,
+} from './store';
 import { useCatchCallback, useAsyncTask } from './reactHelper';
 import { snackBarDurationLongMs } from './common/util/duration';
 import alarm from './resources/alarm.mp3';
@@ -45,6 +51,32 @@ const SocketController = () => {
           return response.json();
         },
         apply: (geofences) => dispatch(geofencesActions.refresh(geofences)),
+        fail: (error) => dispatch(errorsActions.push(error.message)),
+      }),
+    [dispatch],
+  );
+
+  const drawingRefreshScheduler = useMemo(
+    () =>
+      createRefreshScheduler({
+        load: async () => {
+          const response = await fetchOrThrow('/api/drawings');
+          return response.json();
+        },
+        apply: (drawings) => dispatch(drawingsActions.refresh(drawings)),
+        fail: (error) => dispatch(errorsActions.push(error.message)),
+      }),
+    [dispatch],
+  );
+
+  const userRefreshScheduler = useMemo(
+    () =>
+      createRefreshScheduler({
+        load: async () => {
+          const response = await fetchOrThrow('/api/session');
+          return response.json();
+        },
+        apply: (user) => dispatch(sessionActions.updateUser(user)),
         fail: (error) => dispatch(errorsActions.push(error.message)),
       }),
     [dispatch],
@@ -106,6 +138,7 @@ const SocketController = () => {
     socket.onopen = () => {
       dispatch(sessionActions.updateSocket(true));
       geofenceRefreshScheduler.schedule();
+      drawingRefreshScheduler.schedule();
     };
 
     socket.onclose = async (event) => {
@@ -156,8 +189,21 @@ const SocketController = () => {
       if (data.invalidate?.includes('geofences')) {
         geofenceRefreshScheduler.schedule();
       }
+      if (data.invalidate?.includes('drawings')) {
+        drawingRefreshScheduler.schedule();
+      }
+      if (data.invalidate?.includes('user')) {
+        userRefreshScheduler.schedule();
+      }
     };
-  }, [clearReconnectTimeout, dispatch, geofenceRefreshScheduler, navigate]);
+  }, [
+    clearReconnectTimeout,
+    dispatch,
+    drawingRefreshScheduler,
+    geofenceRefreshScheduler,
+    navigate,
+    userRefreshScheduler,
+  ]);
 
   connectSocketRef.current = connectSocket;
 
@@ -175,12 +221,23 @@ const SocketController = () => {
         return () => {
           clearReconnectTimeout();
           geofenceRefreshScheduler.cancel();
+          drawingRefreshScheduler.cancel();
+          userRefreshScheduler.cancel();
+          dispatch(drawingsActions.refresh([]));
           socketRef.current?.close(logoutCode);
         };
       }
       return null;
     },
-    [authenticated, dispatch, clearReconnectTimeout, connectSocket, geofenceRefreshScheduler],
+    [
+      authenticated,
+      dispatch,
+      clearReconnectTimeout,
+      connectSocket,
+      drawingRefreshScheduler,
+      geofenceRefreshScheduler,
+      userRefreshScheduler,
+    ],
   );
 
   const handleNativeNotification = useCatchCallback(

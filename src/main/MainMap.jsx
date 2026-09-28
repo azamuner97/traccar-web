@@ -19,6 +19,7 @@ import MapScale from '../map/MapScale';
 import MapRuler from '../map/control/MapRuler';
 import MapNotification from '../map/control/MapNotification';
 import useFeatures from '../common/util/useFeatures';
+import MapDrawing from '../map/draw/MapDrawing';
 
 const MainMap = ({ filteredPositions, selectedPosition, onEventsClick }) => {
   const theme = useTheme();
@@ -30,7 +31,7 @@ const MainMap = ({ filteredPositions, selectedPosition, onEventsClick }) => {
 
   const features = useFeatures();
 
-  const [rulerActive, setRulerActive] = useState(false);
+  const [activeMapTool, setActiveMapTool] = useState(null);
 
   const onMarkerClick = useCallback(
     (_, deviceId) => {
@@ -51,12 +52,20 @@ const MainMap = ({ filteredPositions, selectedPosition, onEventsClick }) => {
           onMarkerClick={onMarkerClick}
           selectedPosition={selectedPosition}
           showStatus
-          disabled={rulerActive}
+          disabled={Boolean(activeMapTool)}
         />
         <MapDefaultCamera filteredPositions={filteredPositions} />
         {selectedPosition && <MapSelectedDevice />}
         <PoiMap />
-        <MapRuler positions={filteredPositions} onActiveChange={setRulerActive} />
+        <MapRuler
+          positions={filteredPositions}
+          active={activeMapTool === 'ruler'}
+          onActiveChange={(value) => setActiveMapTool(value ? 'ruler' : null)}
+        />
+        <MapDrawing
+          active={activeMapTool === 'drawing'}
+          onActiveChange={(value) => setActiveMapTool(value ? 'drawing' : null)}
+        />
         {!features.disableEvents && (
           <MapNotification enabled={eventsAvailable} onClick={onEventsClick} />
         )}
