@@ -675,6 +675,15 @@
     "mapDrawingDeleteOther": "Delete another user’s drawing",
     "mapDrawingDeleteConfirm": "Delete this drawing?",
     "mapDrawingDeleteOtherConfirm": "Delete this other user’s drawing?",
+    "mapDrawingExpand": "Expand drawing toolbar",
+    "mapDrawingCollapse": "Collapse drawing toolbar",
+    "mapDrawingTextSize": "Text size",
+    "mapDrawingTextSmall": "Small",
+    "mapDrawingTextMedium": "Medium",
+    "mapDrawingTextLarge": "Large",
+    "mapDrawingTextExtraLarge": "Extra Large",
+    "mapDrawingTextBold": "Bold",
+    "mapDrawingTextItalic": "Italic",
     "mapDrawingOwner": "Owner",
     "userEnableMapDrawing": "Enable map drawing"
 }

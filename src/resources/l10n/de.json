@@ -675,6 +675,15 @@
     "mapDrawingDeleteOther": "Zeichnung eines anderen Benutzers löschen",
     "mapDrawingDeleteConfirm": "Diese Zeichnung löschen?",
     "mapDrawingDeleteOtherConfirm": "Diese Zeichnung eines anderen Benutzers löschen?",
+    "mapDrawingExpand": "Zeichenleiste erweitern",
+    "mapDrawingCollapse": "Zeichenleiste einklappen",
+    "mapDrawingTextSize": "Textgröße",
+    "mapDrawingTextSmall": "Klein",
+    "mapDrawingTextMedium": "Mittel",
+    "mapDrawingTextLarge": "Groß",
+    "mapDrawingTextExtraLarge": "Sehr groß",
+    "mapDrawingTextBold": "Fett",
+    "mapDrawingTextItalic": "Kursiv",
     "mapDrawingOwner": "Eigentümer",
     "userEnableMapDrawing": "Kartenzeichnungen aktivieren"
 }

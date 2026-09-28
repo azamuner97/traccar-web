@@ -9,6 +9,8 @@ import {
   DialogTitle,
   Button,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import VisibilityIcon from '@mui/icons-material/Visibility';
@@ -22,6 +24,9 @@ import CircleOutlinedIcon from '@mui/icons-material/CircleOutlined';
 import TextFieldsIcon from '@mui/icons-material/TextFields';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlineOutlined';
 import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettingsOutlined';
+import DrawOutlinedIcon from '@mui/icons-material/DrawOutlined';
+import FormatBoldIcon from '@mui/icons-material/FormatBold';
+import FormatItalicIcon from '@mui/icons-material/FormatItalic';
 import {
   TerraDraw,
   TerraDrawCircleMode,
@@ -32,21 +37,29 @@ import {
   TerraDrawSelectMode,
 } from 'terra-draw';
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter';
-import { map } from '../core/MapView';
+import { map, useMapReady } from '../core/MapView';
 import useMapLayer from '../core/useMapLayer';
-import { findFonts, fromMapCoordinates, toMapCoordinates } from '../core/mapUtil';
+import { fromMapCoordinates, toMapCoordinates } from '../core/mapUtil';
 import fetchOrThrow from '../../common/util/fetchOrThrow';
 import { drawingsActions, errorsActions } from '../../store';
 import { useTranslation } from '../../common/components/LocalizationProvider';
 import {
   canEditDrawings,
+  createArrowheadSdfImage,
+  DEFAULT_DRAWING_TEXT_SIZE,
+  DRAWING_TEXT_SIZES,
+  drawingToolbarExpandedKey,
   drawingVisibilityKey,
+  drawingFeatureId,
   drawingToEditableFeature,
   drawingsToFeatureCollection,
   editableFeatureToDrawing,
   loadDrawingVisibility,
+  loadDrawingToolbarExpanded,
   normalizeDrawingColor,
   normalizeDrawingText,
+  normalizeDrawingTextSize,
+  staticDrawingFilter,
 } from './drawingUtils';
 
 const drawingModes = {
@@ -69,9 +82,26 @@ const DrawingButton = ({ title, active, onClick, children }) => (
   </button>
 );
 
+const MarkupIcon = () => (
+  <span
+    style={{
+      width: 22,
+      height: 22,
+      border: '1.5px solid currentColor',
+      borderRadius: '50%',
+      display: 'grid',
+      placeItems: 'center',
+      boxSizing: 'border-box',
+    }}
+  >
+    <DrawOutlinedIcon sx={{ fontSize: 16 }} />
+  </span>
+);
+
 const DrawingControls = ({
   t,
   visible,
+  expanded,
   editable,
   administrator,
   activeMode,
@@ -79,6 +109,7 @@ const DrawingControls = ({
   color,
   adminDelete,
   onVisible,
+  onExpanded,
   onMode,
   onColor,
   onDelete,
@@ -88,7 +119,14 @@ const DrawingControls = ({
     <DrawingButton title={visible ? t('mapDrawingHide') : t('mapDrawingShow')} onClick={onVisible}>
       {visible ? <VisibilityOffIcon fontSize="small" /> : <VisibilityIcon fontSize="small" />}
     </DrawingButton>
-    {visible && editable && (
+    <DrawingButton
+      title={expanded ? t('mapDrawingCollapse') : t('mapDrawingExpand')}
+      active={expanded}
+      onClick={onExpanded}
+    >
+      <MarkupIcon />
+    </DrawingButton>
+    {expanded && visible && editable && (
       <>
         <DrawingButton
           title={t('mapDrawingEdit')}
@@ -139,13 +177,35 @@ const DrawingControls = ({
         >
           <CircleOutlinedIcon fontSize="small" />
         </DrawingButton>
-        <label title={t('mapDrawingColor')} style={{ width: 29, height: 29, display: 'block' }}>
+        <label
+          title={t('mapDrawingColor')}
+          style={{
+            position: 'relative',
+            width: 29,
+            height: 29,
+            display: 'grid',
+            placeItems: 'center',
+            cursor: 'pointer',
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              width: 18,
+              height: 18,
+              borderRadius: '50%',
+              backgroundColor: color,
+              border: '2px solid white',
+              boxShadow: '0 0 0 1px rgba(0, 0, 0, 0.45)',
+              boxSizing: 'border-box',
+            }}
+          />
           <input
             aria-label={t('mapDrawingColor')}
             type="color"
             value={color}
             onChange={(event) => onColor(event.target.value)}
-            style={{ width: 29, height: 29, padding: 4, border: 0, background: 'transparent' }}
+            style={{ position: 'absolute', inset: 0, width: 29, height: 29, opacity: 0 }}
           />
         </label>
         <DrawingButton title={t('mapDrawingDelete')} onClick={onDelete}>
@@ -153,7 +213,7 @@ const DrawingControls = ({
         </DrawingButton>
       </>
     )}
-    {visible && administrator && (
+    {expanded && visible && administrator && (
       <DrawingButton
         title={t('mapDrawingDeleteOther')}
         active={adminDelete}
@@ -165,9 +225,31 @@ const DrawingControls = ({
   </>
 );
 
-const MapDrawingLayer = ({ drawings, enabled, onDrawingClick }) => {
+const DRAWING_ARROWHEAD_IMAGE = 'drawing-arrowhead-sdf';
+
+const useDrawingArrowheadImage = (enabled) => {
+  const mapReady = useMapReady();
+  const [imageReady, setImageReady] = useState(false);
+
+  useEffect(() => {
+    if (!enabled || !mapReady) {
+      setImageReady(false);
+      return;
+    }
+    if (!map.hasImage(DRAWING_ARROWHEAD_IMAGE)) {
+      map.addImage(DRAWING_ARROWHEAD_IMAGE, createArrowheadSdfImage(), { sdf: true });
+    }
+    setImageReady(true);
+    return () => setImageReady(false);
+  }, [enabled, mapReady]);
+
+  return imageReady;
+};
+
+const MapDrawingLayer = ({ drawings, enabled, editingOwnerId, onDrawingClick }) => {
   const t = useTranslation();
   const popupRef = useRef();
+  const arrowheadReady = useDrawingArrowheadImage(enabled);
 
   useEffect(
     () => () => {
@@ -179,6 +261,7 @@ const MapDrawingLayer = ({ drawings, enabled, onDrawingClick }) => {
   const showOwner = useCallback(
     (event) => {
       const feature = event.features[0];
+      if (Number(feature.properties.ownerId) === editingOwnerId) return;
       popupRef.current?.remove();
       const content = document.createElement('div');
       content.textContent = `${t('mapDrawingOwner')}: ${feature.properties.ownerName}`;
@@ -187,24 +270,26 @@ const MapDrawingLayer = ({ drawings, enabled, onDrawingClick }) => {
         .setDOMContent(content)
         .addTo(map);
     },
-    [t],
+    [editingOwnerId, t],
   );
 
   const onClick = useCallback(
     (event) => {
+      if (Number(event.features[0].properties.ownerId) === editingOwnerId) return;
       event.preventDefault();
       if (onDrawingClick(event.features[0].properties.drawingId)) return;
       showOwner(event);
     },
-    [onDrawingClick, showOwner],
+    [editingOwnerId, onDrawingClick, showOwner],
   );
 
   const onMouseEnter = useCallback(
     (event) => {
+      if (Number(event.features[0].properties.ownerId) === editingOwnerId) return;
       map.getCanvas().style.cursor = 'pointer';
       showOwner(event);
     },
-    [showOwner],
+    [editingOwnerId, showOwner],
   );
   const onMouseLeave = useCallback(() => {
     map.getCanvas().style.cursor = '';
@@ -216,12 +301,12 @@ const MapDrawingLayer = ({ drawings, enabled, onDrawingClick }) => {
   );
 
   useMapLayer({
-    enabled,
+    enabled: enabled && arrowheadReady,
     layers: [
       {
         key: 'fill',
         type: 'fill',
-        filter: ['in', ['get', 'drawingType'], ['literal', ['polygon', 'rectangle', 'circle']]],
+        filter: staticDrawingFilter(['polygon', 'rectangle', 'circle'], editingOwnerId),
         paint: {
           'fill-color': ['get', 'color'],
           'fill-opacity': 0.18,
@@ -231,11 +316,10 @@ const MapDrawingLayer = ({ drawings, enabled, onDrawingClick }) => {
       {
         key: 'line',
         type: 'line',
-        filter: [
-          'in',
-          ['get', 'drawingType'],
-          ['literal', ['line', 'arrow', 'polygon', 'rectangle', 'circle']],
-        ],
+        filter: staticDrawingFilter(
+          ['line', 'arrow', 'polygon', 'rectangle', 'circle'],
+          editingOwnerId,
+        ),
         paint: {
           'line-color': ['get', 'color'],
           'line-width': 3,
@@ -247,42 +331,98 @@ const MapDrawingLayer = ({ drawings, enabled, onDrawingClick }) => {
         type: 'symbol',
         filter: ['==', ['get', 'drawingType'], 'arrowhead'],
         layout: {
-          'text-field': '➤',
-          'text-size': 22,
-          'text-rotate': ['get', 'rotation'],
-          'text-rotation-alignment': 'map',
-          'text-allow-overlap': true,
-          'text-font': findFonts(map),
-        },
-        paint: { 'text-color': ['get', 'color'] },
-        on: events,
-      },
-      {
-        key: 'text',
-        type: 'symbol',
-        filter: ['==', ['get', 'drawingType'], 'text'],
-        layout: {
-          'text-field': ['get', 'text'],
-          'text-size': 14,
-          'text-font': findFonts(map),
-          'text-allow-overlap': true,
-          'text-anchor': 'top-left',
-          'text-offset': [0.4, 0.4],
+          'icon-image': DRAWING_ARROWHEAD_IMAGE,
+          'icon-size': 0.72,
+          'icon-rotate': ['get', 'rotation'],
+          'icon-rotation-alignment': 'map',
+          'icon-allow-overlap': true,
+          'icon-ignore-placement': true,
         },
         paint: {
-          'text-color': ['get', 'color'],
-          'text-halo-color': 'white',
-          'text-halo-width': 1.5,
+          'icon-color': ['get', 'color'],
+          'icon-halo-color': 'white',
+          'icon-halo-width': 0.75,
         },
         on: events,
       },
     ],
-    layersDeps: [events],
+    layersDeps: [events, editingOwnerId, arrowheadReady],
     data: drawingsToFeatureCollection(drawings, ([longitude, latitude]) =>
       toMapCoordinates(longitude, latitude),
     ),
     dataDeps: [drawings],
   });
+
+  return null;
+};
+
+const MapDrawingTextMarkers = ({
+  drawings,
+  enabled,
+  editingOwnerId,
+  selectedDrawingId,
+  onEditDrawing,
+  onDrawingClick,
+}) => {
+  const t = useTranslation();
+
+  useEffect(() => {
+    if (!enabled) return undefined;
+    const markers = drawings
+      .filter((drawing) => drawing.type === 'text')
+      .map((drawing) => {
+        const element = document.createElement('div');
+        element.textContent = drawing.text || '';
+        element.style.color = normalizeDrawingColor(drawing.color);
+        element.style.fontSize = `${normalizeDrawingTextSize(drawing.textSize)}px`;
+        element.style.fontWeight = drawing.textBold ? '700' : '400';
+        element.style.fontStyle = drawing.textItalic ? 'italic' : 'normal';
+        element.style.fontFamily = 'sans-serif';
+        element.style.lineHeight = '1.2';
+        element.style.whiteSpace = 'pre-wrap';
+        element.style.overflowWrap = 'anywhere';
+        element.style.textShadow =
+          '-1px -1px 0 white, 1px -1px 0 white, -1px 1px 0 white, 1px 1px 0 white, 0 0 3px white';
+        element.style.userSelect = 'none';
+        element.style.cursor = 'pointer';
+        element.style.pointerEvents = drawing.id === selectedDrawingId ? 'none' : 'auto';
+
+        let popup;
+        const showOwner = () => {
+          popup?.remove();
+          const content = document.createElement('div');
+          content.textContent = `${t('mapDrawingOwner')}: ${drawing.ownerName || ''}`;
+          const [longitude, latitude] = drawing.geometry.coordinates;
+          popup = new maplibregl.Popup({ closeButton: false, closeOnMove: true })
+            .setLngLat(toMapCoordinates(longitude, latitude))
+            .setDOMContent(content)
+            .addTo(map);
+        };
+        const handleClick = (event) => {
+          event.stopPropagation();
+          if (drawing.ownerId === editingOwnerId && onEditDrawing(drawing.id)) return;
+          if (!onDrawingClick(drawing.id)) showOwner();
+        };
+        element.onmouseenter = showOwner;
+        element.onmouseleave = () => popup?.remove();
+        element.onclick = handleClick;
+
+        const [longitude, latitude] = drawing.geometry.coordinates;
+        const marker = new maplibregl.Marker({ element, anchor: 'top-left', offset: [5, 5] })
+          .setLngLat(toMapCoordinates(longitude, latitude))
+          .addTo(map);
+        return {
+          remove: () => {
+            popup?.remove();
+            element.onmouseenter = null;
+            element.onmouseleave = null;
+            element.onclick = null;
+            marker.remove();
+          },
+        };
+      });
+    return () => markers.forEach((marker) => marker.remove());
+  }, [drawings, editingOwnerId, enabled, onDrawingClick, onEditDrawing, selectedDrawingId, t]);
 
   return null;
 };
@@ -299,8 +439,12 @@ const MapDrawing = ({ active, onActiveChange }) => {
   const drawings = useMemo(() => Object.values(drawingItems), [drawingItems]);
   const editable = canEditDrawings(user);
   const visibilityKey = drawingVisibilityKey(user.id);
+  const expandedKey = drawingToolbarExpandedKey(user.id);
 
   const [visible, setVisible] = useState(() => loadDrawingVisibility(window.localStorage, user.id));
+  const [expanded, setExpanded] = useState(() =>
+    loadDrawingToolbarExpanded(window.localStorage, user.id),
+  );
   const [requestedMode, setRequestedMode] = useState('select');
   const [activeMode, setActiveMode] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
@@ -308,14 +452,27 @@ const MapDrawing = ({ active, onActiveChange }) => {
   const [adminDelete, setAdminDelete] = useState(false);
   const [pendingText, setPendingText] = useState(null);
   const [textValue, setTextValue] = useState('');
+  const [textSize, setTextSize] = useState(DEFAULT_DRAWING_TEXT_SIZE);
+  const [textBold, setTextBold] = useState(false);
+  const [textItalic, setTextItalic] = useState(false);
 
   const drawRef = useRef();
+  const onActiveChangeRef = useRef(onActiveChange);
   const drawingsRef = useRef(drawings);
   const requestedModeRef = useRef(requestedMode);
   const colorRef = useRef(color);
   drawingsRef.current = drawings;
   requestedModeRef.current = requestedMode;
   colorRef.current = color;
+  onActiveChangeRef.current = onActiveChange;
+
+  useEffect(() => {
+    setVisible(loadDrawingVisibility(window.localStorage, user.id));
+    setExpanded(loadDrawingToolbarExpanded(window.localStorage, user.id));
+    setAdminDelete(false);
+    setRequestedMode('select');
+    onActiveChangeRef.current(false);
+  }, [user.id]);
 
   const updateVisible = useCallback(
     (value) => {
@@ -323,6 +480,19 @@ const MapDrawing = ({ active, onActiveChange }) => {
       window.localStorage.setItem(visibilityKey, JSON.stringify(value));
     },
     [visibilityKey],
+  );
+
+  const updateExpanded = useCallback(
+    (value) => {
+      setExpanded(value);
+      window.localStorage.setItem(expandedKey, JSON.stringify(value));
+      if (!value) {
+        setAdminDelete(false);
+        setRequestedMode('select');
+        onActiveChange(false);
+      }
+    },
+    [expandedKey, onActiveChange],
   );
 
   const refresh = useCallback(async () => {
@@ -424,7 +594,14 @@ const MapDrawing = ({ active, onActiveChange }) => {
           drawInteraction: 'click-move-or-drag',
           styles: { fillColor: styleColor, outlineColor: styleColor, fillOpacity: 0.18 },
         }),
-        new TerraDrawPointMode({ styles: { pointColor: styleColor, pointWidth: 8 } }),
+        new TerraDrawPointMode({
+          styles: {
+            pointColor: styleColor,
+            pointWidth: (feature) => (feature.properties.drawingType === 'text' ? 1 : 8),
+            pointOpacity: (feature) => (feature.properties.drawingType === 'text' ? 0 : 1),
+            pointOutlineOpacity: (feature) => (feature.properties.drawingType === 'text' ? 0 : 1),
+          },
+        }),
       ],
     });
     drawRef.current = draw;
@@ -445,8 +622,16 @@ const MapDrawing = ({ active, onActiveChange }) => {
       });
       const updatedFeature = draw.getSnapshotFeature(id);
       if (drawingType === 'text' && !updatedFeature.properties.drawingId) {
+        draw.updateFeatureProperties(id, {
+          textSize: DEFAULT_DRAWING_TEXT_SIZE,
+          textBold: false,
+          textItalic: false,
+        });
         setPendingText({ featureId: id, existing: false });
         setTextValue('');
+        setTextSize(DEFAULT_DRAWING_TEXT_SIZE);
+        setTextBold(false);
+        setTextItalic(false);
       } else {
         writeFeature(updatedFeature, drawingType, drawingColor);
         setRequestedMode('select');
@@ -481,6 +666,9 @@ const MapDrawing = ({ active, onActiveChange }) => {
         if (feature?.properties.drawingType === 'text') {
           setPendingText({ featureId: selectedId, existing: true });
           setTextValue(feature.properties.text || '');
+          setTextSize(normalizeDrawingTextSize(feature.properties.textSize));
+          setTextBold(Boolean(feature.properties.textBold));
+          setTextItalic(Boolean(feature.properties.textItalic));
           return;
         }
       }
@@ -537,16 +725,33 @@ const MapDrawing = ({ active, onActiveChange }) => {
     [adminDelete, dispatch, drawingItems, refresh, t, user.id],
   );
 
+  const selectTextDrawing = useCallback((drawingId) => {
+    const draw = drawRef.current;
+    const featureId = drawingFeatureId(drawingId);
+    if (!draw?.enabled || !draw.hasFeature(featureId)) return false;
+    setAdminDelete(false);
+    setRequestedMode('select');
+    if (draw.getMode() !== 'select') draw.setMode('select');
+    draw.selectFeature(featureId);
+    return true;
+  }, []);
+
   const saveText = useCallback(async () => {
     const draw = drawRef.current;
     const feature = pendingText && draw?.getSnapshotFeature(pendingText.featureId);
     const normalized = normalizeDrawingText(textValue).trim();
     if (!feature || !normalized) return;
-    draw.updateFeatureProperties(feature.id, { text: normalized, drawingType: 'text' });
+    draw.updateFeatureProperties(feature.id, {
+      text: normalized,
+      drawingType: 'text',
+      textSize,
+      textBold,
+      textItalic,
+    });
     await writeFeature(draw.getSnapshotFeature(feature.id), 'text', colorRef.current, normalized);
     setPendingText(null);
     setRequestedMode('select');
-  }, [pendingText, textValue, writeFeature]);
+  }, [pendingText, textBold, textItalic, textSize, textValue, writeFeature]);
 
   const cancelText = useCallback(() => {
     const draw = drawRef.current;
@@ -564,9 +769,9 @@ const MapDrawing = ({ active, onActiveChange }) => {
       onAdd: () => {
         container = document.createElement('div');
         container.className = 'maplibregl-ctrl maplibregl-ctrl-group';
-        container.style.display = 'flex';
-        container.style.flexWrap = 'wrap';
-        container.style.maxWidth = '174px';
+        container.style.display = 'grid';
+        container.style.gridTemplateColumns = 'repeat(2, 29px)';
+        container.style.width = '58px';
         controlsRootRef.current = createRoot(container);
         return container;
       },
@@ -585,6 +790,7 @@ const MapDrawing = ({ active, onActiveChange }) => {
       <DrawingControls
         t={t}
         visible={visible}
+        expanded={expanded}
         editable={editable}
         administrator={user.administrator}
         activeMode={activeMode}
@@ -592,9 +798,14 @@ const MapDrawing = ({ active, onActiveChange }) => {
         color={color}
         adminDelete={adminDelete}
         onVisible={() => {
+          if (visible) cancelText();
           updateVisible(!visible);
           setAdminDelete(false);
           if (visible) onActiveChange(false);
+        }}
+        onExpanded={() => {
+          if (expanded) cancelText();
+          updateExpanded(!expanded);
         }}
         onMode={selectMode}
         onColor={changeColor}
@@ -614,25 +825,43 @@ const MapDrawing = ({ active, onActiveChange }) => {
   }, [
     activeMode,
     adminDelete,
+    cancelText,
     changeColor,
     color,
     deleteSelected,
     editable,
+    expanded,
     onActiveChange,
     selectMode,
     selectedId,
     updateVisible,
+    updateExpanded,
     t,
     user.administrator,
     visible,
   ]);
 
-  const layerDrawings =
-    active && editable ? drawings.filter((drawing) => drawing.ownerId !== user.id) : drawings;
+  const editingOwnerId = active && editable ? user.id : null;
+  const selectedDrawingId = Number(
+    selectedId && drawRef.current?.getSnapshotFeature(selectedId)?.properties.drawingId,
+  );
 
   return (
     <>
-      <MapDrawingLayer drawings={layerDrawings} enabled={visible} onDrawingClick={deleteForeign} />
+      <MapDrawingLayer
+        drawings={drawings}
+        enabled={visible}
+        editingOwnerId={editingOwnerId}
+        selectedDrawingId={selectedDrawingId || null}
+        onEditDrawing={selectTextDrawing}
+        onDrawingClick={deleteForeign}
+      />
+      <MapDrawingTextMarkers
+        drawings={drawings}
+        enabled={visible}
+        editingOwnerId={editingOwnerId}
+        onDrawingClick={deleteForeign}
+      />
       <Dialog open={Boolean(pendingText)} onClose={cancelText} fullWidth maxWidth="sm">
         <DialogTitle>
           {pendingText?.existing ? t('mapDrawingEditText') : t('mapDrawingText')}
@@ -649,6 +878,63 @@ const MapDrawing = ({ active, onActiveChange }) => {
             onChange={(event) => setTextValue(normalizeDrawingText(event.target.value))}
             helperText={`${textValue.length}/200`}
           />
+          <div
+            style={{
+              display: 'flex',
+              gap: 12,
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              marginTop: 12,
+            }}
+          >
+            <ToggleButtonGroup
+              exclusive
+              size="small"
+              value={textSize}
+              aria-label={t('mapDrawingTextSize')}
+              onChange={(_, value) => value && setTextSize(value)}
+            >
+              {DRAWING_TEXT_SIZES.map((size, index) => {
+                const keys = [
+                  'mapDrawingTextSmall',
+                  'mapDrawingTextMedium',
+                  'mapDrawingTextLarge',
+                  'mapDrawingTextExtraLarge',
+                ];
+                const labels = ['S', 'M', 'L', 'XL'];
+                return (
+                  <ToggleButton
+                    key={size}
+                    value={size}
+                    title={t(keys[index])}
+                    aria-label={t(keys[index])}
+                  >
+                    {labels[index]}
+                  </ToggleButton>
+                );
+              })}
+            </ToggleButtonGroup>
+            <ToggleButton
+              size="small"
+              selected={textBold}
+              value="bold"
+              title={t('mapDrawingTextBold')}
+              aria-label={t('mapDrawingTextBold')}
+              onChange={() => setTextBold((value) => !value)}
+            >
+              <FormatBoldIcon fontSize="small" />
+            </ToggleButton>
+            <ToggleButton
+              size="small"
+              selected={textItalic}
+              value="italic"
+              title={t('mapDrawingTextItalic')}
+              aria-label={t('mapDrawingTextItalic')}
+              onChange={() => setTextItalic((value) => !value)}
+            >
+              <FormatItalicIcon fontSize="small" />
+            </ToggleButton>
+          </div>
         </DialogContent>
         <DialogActions>
           <Button onClick={cancelText}>{t('sharedCancel')}</Button>
