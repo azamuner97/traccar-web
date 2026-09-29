@@ -670,6 +670,7 @@
     "mapDrawingCircle": "Kreis zeichnen",
     "mapDrawingText": "Text hinzufügen",
     "mapDrawingEditText": "Text bearbeiten",
+    "mapDrawingProperties": "Zeichnungseigenschaften",
     "mapDrawingColor": "Zeichnungsfarbe",
     "mapDrawingDelete": "Zeichnung löschen",
     "mapDrawingDeleteOther": "Zeichnung eines anderen Benutzers löschen",

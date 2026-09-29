@@ -1,7 +1,6 @@
 import { useId, useEffect } from 'react';
 import { map } from './MapView';
-
-const emptyFeatureCollection = { type: 'FeatureCollection', features: [] };
+import { createMapSource } from './mapLayerUtils';
 
 const useMapLayer = ({ enabled = true, source, layers, layersDeps, data, dataDeps = [] }) => {
   const id = useId();
@@ -10,11 +9,7 @@ const useMapLayer = ({ enabled = true, source, layers, layersDeps, data, dataDep
     if (!enabled) {
       return;
     }
-    const isGeoJson = !source?.type || source.type === 'geojson';
-    map.addSource(
-      id,
-      isGeoJson ? { type: 'geojson', data: emptyFeatureCollection, ...source } : source,
-    );
+    map.addSource(id, createMapSource(source, data));
     layers.forEach((layer) => {
       const { on, key, ...spec } = layer;
       const layerId = key ? `${id}-${key}` : id;

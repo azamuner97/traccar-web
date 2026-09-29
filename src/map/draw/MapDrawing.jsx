@@ -27,6 +27,7 @@ import AdminPanelSettingsOutlinedIcon from '@mui/icons-material/AdminPanelSettin
 import DrawOutlinedIcon from '@mui/icons-material/DrawOutlined';
 import FormatBoldIcon from '@mui/icons-material/FormatBold';
 import FormatItalicIcon from '@mui/icons-material/FormatItalic';
+import TuneOutlinedIcon from '@mui/icons-material/TuneOutlined';
 import {
   TerraDraw,
   TerraDrawCircleMode,
@@ -44,6 +45,7 @@ import fetchOrThrow from '../../common/util/fetchOrThrow';
 import { drawingsActions, errorsActions } from '../../store';
 import { useTranslation } from '../../common/components/LocalizationProvider';
 import {
+  canDeleteDrawingInMode,
   canEditDrawings,
   createArrowheadSdfImage,
   DEFAULT_DRAWING_TEXT_SIZE,
@@ -59,6 +61,7 @@ import {
   normalizeDrawingColor,
   normalizeDrawingText,
   normalizeDrawingTextSize,
+  nextDrawingDeleteMode,
   staticDrawingFilter,
 } from './drawingUtils';
 
@@ -71,10 +74,11 @@ const drawingModes = {
   text: 'point',
 };
 
-const DrawingButton = ({ title, active, onClick, children }) => (
+const DrawingButton = ({ title, active, disabled = false, onClick, children }) => (
   <button
     type="button"
     title={title}
+    disabled={disabled}
     onClick={onClick}
     style={{ backgroundColor: active ? '#e6e6e6' : undefined }}
   >
@@ -107,10 +111,11 @@ const DrawingControls = ({
   activeMode,
   selected,
   color,
-  adminDelete,
+  deleteMode,
   onVisible,
   onExpanded,
   onMode,
+  onProperties,
   onColor,
   onDelete,
   onAdminDelete,
@@ -164,7 +169,7 @@ const DrawingControls = ({
           <CropSquareIcon fontSize="small" />
         </DrawingButton>
         <DrawingButton
-          title={selected ? t('mapDrawingEditText') : t('mapDrawingText')}
+          title={t('mapDrawingText')}
           active={activeMode === 'text'}
           onClick={() => onMode('text')}
         >
@@ -208,7 +213,18 @@ const DrawingControls = ({
             style={{ position: 'absolute', inset: 0, width: 29, height: 29, opacity: 0 }}
           />
         </label>
-        <DrawingButton title={t('mapDrawingDelete')} onClick={onDelete}>
+        <DrawingButton
+          title={t('mapDrawingProperties')}
+          disabled={!selected}
+          onClick={onProperties}
+        >
+          <TuneOutlinedIcon fontSize="small" />
+        </DrawingButton>
+        <DrawingButton
+          title={t('mapDrawingDelete')}
+          active={deleteMode === 'own'}
+          onClick={onDelete}
+        >
           <DeleteOutlineIcon fontSize="small" />
         </DrawingButton>
       </>
@@ -216,7 +232,7 @@ const DrawingControls = ({
     {expanded && visible && administrator && (
       <DrawingButton
         title={t('mapDrawingDeleteOther')}
-        active={adminDelete}
+        active={deleteMode === 'foreign'}
         onClick={onAdminDelete}
       >
         <AdminPanelSettingsOutlinedIcon fontSize="small" />
@@ -350,7 +366,7 @@ const MapDrawingLayer = ({ drawings, enabled, editingOwnerId, onDrawingClick }) 
     data: drawingsToFeatureCollection(drawings, ([longitude, latitude]) =>
       toMapCoordinates(longitude, latitude),
     ),
-    dataDeps: [drawings],
+    dataDeps: [drawings, editingOwnerId, events],
   });
 
   return null;
@@ -449,8 +465,9 @@ const MapDrawing = ({ active, onActiveChange }) => {
   const [activeMode, setActiveMode] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [color, setColor] = useState('#FF0000');
-  const [adminDelete, setAdminDelete] = useState(false);
-  const [pendingText, setPendingText] = useState(null);
+  const [deleteMode, setDeleteMode] = useState(null);
+  const [pendingProperties, setPendingProperties] = useState(null);
+  const [propertiesColor, setPropertiesColor] = useState('#FF0000');
   const [textValue, setTextValue] = useState('');
   const [textSize, setTextSize] = useState(DEFAULT_DRAWING_TEXT_SIZE);
   const [textBold, setTextBold] = useState(false);
@@ -461,6 +478,8 @@ const MapDrawing = ({ active, onActiveChange }) => {
   const drawingsRef = useRef(drawings);
   const requestedModeRef = useRef(requestedMode);
   const colorRef = useRef(color);
+  const deletingIdsRef = useRef(new Set());
+  const wasActiveRef = useRef(active);
   drawingsRef.current = drawings;
   requestedModeRef.current = requestedMode;
   colorRef.current = color;
@@ -469,10 +488,25 @@ const MapDrawing = ({ active, onActiveChange }) => {
   useEffect(() => {
     setVisible(loadDrawingVisibility(window.localStorage, user.id));
     setExpanded(loadDrawingToolbarExpanded(window.localStorage, user.id));
-    setAdminDelete(false);
+    setDeleteMode(null);
+    setPendingProperties(null);
     setRequestedMode('select');
     onActiveChangeRef.current(false);
   }, [user.id]);
+
+  useEffect(() => {
+    if (wasActiveRef.current && !active) setDeleteMode(null);
+    wasActiveRef.current = active;
+  }, [active]);
+
+  useEffect(() => {
+    if (!editable) {
+      setDeleteMode(null);
+      setPendingProperties(null);
+      setRequestedMode('select');
+      onActiveChangeRef.current(false);
+    }
+  }, [editable]);
 
   const updateVisible = useCallback(
     (value) => {
@@ -487,7 +521,7 @@ const MapDrawing = ({ active, onActiveChange }) => {
       setExpanded(value);
       window.localStorage.setItem(expandedKey, JSON.stringify(value));
       if (!value) {
-        setAdminDelete(false);
+        setDeleteMode(null);
         setRequestedMode('select');
         onActiveChange(false);
       }
@@ -510,6 +544,10 @@ const MapDrawing = ({ active, onActiveChange }) => {
         drawingText,
         ([longitude, latitude]) => fromMapCoordinates(longitude, latitude),
       );
+      if (existingId) {
+        const existing = drawingsRef.current.find((drawing) => drawing.id === existingId);
+        if (existing) dispatch(drawingsActions.upsert({ ...existing, ...payload }));
+      }
       try {
         const response = await fetchOrThrow(
           existingId ? `/api/drawings/${existingId}` : '/api/drawings',
@@ -524,9 +562,14 @@ const MapDrawing = ({ active, onActiveChange }) => {
         if (!existingId && drawRef.current?.hasFeature(feature.id)) {
           drawRef.current.removeFeatures([feature.id]);
         }
+        return true;
       } catch (error) {
         dispatch(errorsActions.push(error.message));
+        if (!existingId && drawRef.current?.hasFeature(feature.id)) {
+          drawRef.current.removeFeatures([feature.id]);
+        }
         await refresh();
+        return false;
       }
     },
     [dispatch, refresh],
@@ -555,7 +598,7 @@ const MapDrawing = ({ active, onActiveChange }) => {
   }, [drawings, syncEditor]);
 
   useEffect(() => {
-    if (!active || !visible || !editable) return undefined;
+    if (!active || !visible || !editable || deleteMode) return undefined;
     const styleColor = (feature) => featureColor(feature, colorRef);
     const draw = new TerraDraw({
       adapter: new TerraDrawMapLibreGLAdapter({ map, prefixId: 'map-drawing-editor' }),
@@ -623,11 +666,13 @@ const MapDrawing = ({ active, onActiveChange }) => {
       const updatedFeature = draw.getSnapshotFeature(id);
       if (drawingType === 'text' && !updatedFeature.properties.drawingId) {
         draw.updateFeatureProperties(id, {
+          text: '',
           textSize: DEFAULT_DRAWING_TEXT_SIZE,
           textBold: false,
           textItalic: false,
         });
-        setPendingText({ featureId: id, existing: false });
+        setPendingProperties({ featureId: id, isNew: true, drawingType: 'text' });
+        setPropertiesColor(normalizeDrawingColor(drawingColor));
         setTextValue('');
         setTextSize(DEFAULT_DRAWING_TEXT_SIZE);
         setTextBold(false);
@@ -649,7 +694,7 @@ const MapDrawing = ({ active, onActiveChange }) => {
       setSelectedId(null);
       setActiveMode(null);
     };
-  }, [active, editable, syncEditor, visible, writeFeature]);
+  }, [active, deleteMode, editable, syncEditor, visible, writeFeature]);
 
   useEffect(() => {
     const draw = drawRef.current;
@@ -661,23 +706,24 @@ const MapDrawing = ({ active, onActiveChange }) => {
 
   const selectMode = useCallback(
     (mode) => {
-      if (mode === 'text' && selectedId) {
-        const feature = drawRef.current?.getSnapshotFeature(selectedId);
-        if (feature?.properties.drawingType === 'text') {
-          setPendingText({ featureId: selectedId, existing: true });
-          setTextValue(feature.properties.text || '');
-          setTextSize(normalizeDrawingTextSize(feature.properties.textSize));
-          setTextBold(Boolean(feature.properties.textBold));
-          setTextItalic(Boolean(feature.properties.textItalic));
-          return;
-        }
-      }
-      setAdminDelete(false);
+      setDeleteMode(null);
       setRequestedMode(mode);
       onActiveChange(true);
     },
-    [onActiveChange, selectedId],
+    [onActiveChange],
   );
+
+  const openSelectedProperties = useCallback(() => {
+    const feature = selectedId && drawRef.current?.getSnapshotFeature(selectedId);
+    if (!feature?.properties.drawingId) return;
+    const drawingType = feature.properties.drawingType;
+    setPendingProperties({ featureId: selectedId, isNew: false, drawingType });
+    setPropertiesColor(normalizeDrawingColor(feature.properties.color));
+    setTextValue(feature.properties.text || '');
+    setTextSize(normalizeDrawingTextSize(feature.properties.textSize));
+    setTextBold(Boolean(feature.properties.textBold));
+    setTextItalic(Boolean(feature.properties.textItalic));
+  }, [selectedId]);
 
   const changeColor = useCallback(
     async (value) => {
@@ -693,74 +739,89 @@ const MapDrawing = ({ active, onActiveChange }) => {
     [selectedId, writeFeature],
   );
 
-  const deleteSelected = useCallback(async () => {
-    const draw = drawRef.current;
-    const feature = selectedId && draw?.getSnapshotFeature(selectedId);
-    const drawingId = Number(feature?.properties.drawingId);
-    if (!drawingId || !window.confirm(t('mapDrawingDeleteConfirm'))) return;
-    try {
-      await fetchOrThrow(`/api/drawings/${drawingId}`, { method: 'DELETE' });
-      dispatch(drawingsActions.remove(drawingId));
-    } catch (error) {
-      dispatch(errorsActions.push(error.message));
-      await refresh();
-    }
-  }, [dispatch, refresh, selectedId, t]);
-
-  const deleteForeign = useCallback(
+  const handleDrawingClick = useCallback(
     (drawingId) => {
-      if (!adminDelete) return false;
-      const drawing = drawingItems[drawingId];
-      if (!drawing || drawing.ownerId === user.id) return true;
-      if (window.confirm(t('mapDrawingDeleteOtherConfirm'))) {
-        fetchOrThrow(`/api/drawings/${drawing.id}`, { method: 'DELETE' })
-          .then(() => dispatch(drawingsActions.remove(drawing.id)))
-          .catch(async (error) => {
-            dispatch(errorsActions.push(error.message));
-            await refresh();
-          });
-      }
+      const drawing = drawingItems[Number(drawingId)];
+      if (!canDeleteDrawingInMode(deleteMode, drawing, user)) return false;
+      if (deletingIdsRef.current.has(drawing.id)) return true;
+      const confirmation =
+        deleteMode === 'foreign' ? t('mapDrawingDeleteOtherConfirm') : t('mapDrawingDeleteConfirm');
+      if (!window.confirm(confirmation)) return true;
+      deletingIdsRef.current.add(drawing.id);
+      void (async () => {
+        try {
+          await fetchOrThrow(`/api/drawings/${drawing.id}`, { method: 'DELETE' });
+          dispatch(drawingsActions.remove(drawing.id));
+        } catch (error) {
+          dispatch(errorsActions.push(error.message));
+          await refresh();
+        } finally {
+          deletingIdsRef.current.delete(drawing.id);
+        }
+      })();
       return true;
     },
-    [adminDelete, dispatch, drawingItems, refresh, t, user.id],
+    [deleteMode, dispatch, drawingItems, refresh, t, user],
   );
 
   const selectTextDrawing = useCallback((drawingId) => {
     const draw = drawRef.current;
     const featureId = drawingFeatureId(drawingId);
     if (!draw?.enabled || !draw.hasFeature(featureId)) return false;
-    setAdminDelete(false);
+    setDeleteMode(null);
     setRequestedMode('select');
     if (draw.getMode() !== 'select') draw.setMode('select');
     draw.selectFeature(featureId);
     return true;
   }, []);
 
-  const saveText = useCallback(async () => {
+  const saveProperties = useCallback(async () => {
     const draw = drawRef.current;
-    const feature = pendingText && draw?.getSnapshotFeature(pendingText.featureId);
-    const normalized = normalizeDrawingText(textValue).trim();
-    if (!feature || !normalized) return;
-    draw.updateFeatureProperties(feature.id, {
-      text: normalized,
-      drawingType: 'text',
-      textSize,
-      textBold,
-      textItalic,
-    });
-    await writeFeature(draw.getSnapshotFeature(feature.id), 'text', colorRef.current, normalized);
-    setPendingText(null);
-    setRequestedMode('select');
-  }, [pendingText, textBold, textItalic, textSize, textValue, writeFeature]);
-
-  const cancelText = useCallback(() => {
-    const draw = drawRef.current;
-    if (pendingText && !pendingText.existing && draw?.hasFeature(pendingText.featureId)) {
-      draw.removeFeatures([pendingText.featureId]);
+    const feature = pendingProperties && draw?.getSnapshotFeature(pendingProperties.featureId);
+    const drawingType = pendingProperties?.drawingType;
+    const normalizedText = drawingType === 'text' ? normalizeDrawingText(textValue).trim() : null;
+    if (!feature || (drawingType === 'text' && !normalizedText)) return;
+    const normalizedColor = normalizeDrawingColor(propertiesColor);
+    const properties = { drawingType, color: normalizedColor };
+    if (drawingType === 'text') {
+      Object.assign(properties, {
+        text: normalizedText,
+        textSize,
+        textBold,
+        textItalic,
+      });
     }
-    setPendingText(null);
+    draw.updateFeatureProperties(feature.id, properties);
+    setColor(normalizedColor);
+    await writeFeature(
+      draw.getSnapshotFeature(feature.id),
+      drawingType,
+      normalizedColor,
+      normalizedText,
+    );
+    setPendingProperties(null);
     setRequestedMode('select');
-  }, [pendingText]);
+  }, [pendingProperties, propertiesColor, textBold, textItalic, textSize, textValue, writeFeature]);
+
+  const cancelProperties = useCallback(() => {
+    const draw = drawRef.current;
+    if (pendingProperties?.isNew && draw?.hasFeature(pendingProperties.featureId)) {
+      draw.removeFeatures([pendingProperties.featureId]);
+    }
+    setPendingProperties(null);
+    setRequestedMode('select');
+  }, [pendingProperties]);
+
+  const toggleDeleteMode = useCallback(
+    (requestedDeleteMode) => {
+      cancelProperties();
+      const nextMode = nextDrawingDeleteMode(deleteMode, requestedDeleteMode);
+      setDeleteMode(nextMode);
+      setRequestedMode('select');
+      onActiveChange(Boolean(nextMode));
+    },
+    [cancelProperties, deleteMode, onActiveChange],
+  );
 
   const controlsRootRef = useRef();
   useEffect(() => {
@@ -796,41 +857,33 @@ const MapDrawing = ({ active, onActiveChange }) => {
         activeMode={activeMode}
         selected={Boolean(selectedId)}
         color={color}
-        adminDelete={adminDelete}
+        deleteMode={deleteMode}
         onVisible={() => {
-          if (visible) cancelText();
+          if (visible) cancelProperties();
           updateVisible(!visible);
-          setAdminDelete(false);
+          setDeleteMode(null);
           if (visible) onActiveChange(false);
         }}
         onExpanded={() => {
-          if (expanded) cancelText();
+          if (expanded) cancelProperties();
           updateExpanded(!expanded);
         }}
         onMode={selectMode}
+        onProperties={openSelectedProperties}
         onColor={changeColor}
-        onDelete={deleteSelected}
-        onAdminDelete={() => {
-          const next = !adminDelete;
-          setAdminDelete(next);
-          if (next) {
-            setRequestedMode('select');
-            onActiveChange(true);
-          } else {
-            onActiveChange(false);
-          }
-        }}
+        onDelete={() => toggleDeleteMode('own')}
+        onAdminDelete={() => toggleDeleteMode('foreign')}
       />,
     );
   }, [
     activeMode,
-    adminDelete,
-    cancelText,
+    cancelProperties,
     changeColor,
     color,
-    deleteSelected,
+    deleteMode,
     editable,
     expanded,
+    openSelectedProperties,
     onActiveChange,
     selectMode,
     selectedId,
@@ -839,9 +892,10 @@ const MapDrawing = ({ active, onActiveChange }) => {
     t,
     user.administrator,
     visible,
+    toggleDeleteMode,
   ]);
 
-  const editingOwnerId = active && editable ? user.id : null;
+  const editingOwnerId = active && editable && !deleteMode ? user.id : null;
   const selectedDrawingId = Number(
     selectedId && drawRef.current?.getSnapshotFeature(selectedId)?.properties.drawingId,
   );
@@ -852,93 +906,109 @@ const MapDrawing = ({ active, onActiveChange }) => {
         drawings={drawings}
         enabled={visible}
         editingOwnerId={editingOwnerId}
-        selectedDrawingId={selectedDrawingId || null}
-        onEditDrawing={selectTextDrawing}
-        onDrawingClick={deleteForeign}
+        onDrawingClick={handleDrawingClick}
       />
       <MapDrawingTextMarkers
         drawings={drawings}
         enabled={visible}
         editingOwnerId={editingOwnerId}
-        onDrawingClick={deleteForeign}
+        selectedDrawingId={selectedDrawingId || null}
+        onEditDrawing={selectTextDrawing}
+        onDrawingClick={handleDrawingClick}
       />
-      <Dialog open={Boolean(pendingText)} onClose={cancelText} fullWidth maxWidth="sm">
+      <Dialog open={Boolean(pendingProperties)} onClose={cancelProperties} fullWidth maxWidth="sm">
         <DialogTitle>
-          {pendingText?.existing ? t('mapDrawingEditText') : t('mapDrawingText')}
+          {pendingProperties?.isNew ? t('mapDrawingText') : t('mapDrawingProperties')}
         </DialogTitle>
         <DialogContent>
           <TextField
-            autoFocus
             fullWidth
-            multiline
-            minRows={3}
             margin="dense"
-            value={textValue}
-            slotProps={{ htmlInput: { maxLength: 200 } }}
-            onChange={(event) => setTextValue(normalizeDrawingText(event.target.value))}
-            helperText={`${textValue.length}/200`}
+            type="color"
+            label={t('mapDrawingColor')}
+            value={propertiesColor}
+            onChange={(event) => setPropertiesColor(normalizeDrawingColor(event.target.value))}
+            slotProps={{ inputLabel: { shrink: true } }}
           />
-          <div
-            style={{
-              display: 'flex',
-              gap: 12,
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              marginTop: 12,
-            }}
-          >
-            <ToggleButtonGroup
-              exclusive
-              size="small"
-              value={textSize}
-              aria-label={t('mapDrawingTextSize')}
-              onChange={(_, value) => value && setTextSize(value)}
-            >
-              {DRAWING_TEXT_SIZES.map((size, index) => {
-                const keys = [
-                  'mapDrawingTextSmall',
-                  'mapDrawingTextMedium',
-                  'mapDrawingTextLarge',
-                  'mapDrawingTextExtraLarge',
-                ];
-                const labels = ['S', 'M', 'L', 'XL'];
-                return (
-                  <ToggleButton
-                    key={size}
-                    value={size}
-                    title={t(keys[index])}
-                    aria-label={t(keys[index])}
-                  >
-                    {labels[index]}
-                  </ToggleButton>
-                );
-              })}
-            </ToggleButtonGroup>
-            <ToggleButton
-              size="small"
-              selected={textBold}
-              value="bold"
-              title={t('mapDrawingTextBold')}
-              aria-label={t('mapDrawingTextBold')}
-              onChange={() => setTextBold((value) => !value)}
-            >
-              <FormatBoldIcon fontSize="small" />
-            </ToggleButton>
-            <ToggleButton
-              size="small"
-              selected={textItalic}
-              value="italic"
-              title={t('mapDrawingTextItalic')}
-              aria-label={t('mapDrawingTextItalic')}
-              onChange={() => setTextItalic((value) => !value)}
-            >
-              <FormatItalicIcon fontSize="small" />
-            </ToggleButton>
-          </div>
+          {pendingProperties?.drawingType === 'text' && (
+            <>
+              <TextField
+                autoFocus
+                fullWidth
+                multiline
+                minRows={3}
+                margin="dense"
+                value={textValue}
+                slotProps={{ htmlInput: { maxLength: 200 } }}
+                onChange={(event) => setTextValue(normalizeDrawingText(event.target.value))}
+                helperText={`${textValue.length}/200`}
+              />
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 12,
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  marginTop: 12,
+                }}
+              >
+                <ToggleButtonGroup
+                  exclusive
+                  size="small"
+                  value={textSize}
+                  aria-label={t('mapDrawingTextSize')}
+                  onChange={(_, value) => value && setTextSize(value)}
+                >
+                  {DRAWING_TEXT_SIZES.map((size, index) => {
+                    const keys = [
+                      'mapDrawingTextSmall',
+                      'mapDrawingTextMedium',
+                      'mapDrawingTextLarge',
+                      'mapDrawingTextExtraLarge',
+                    ];
+                    const labels = ['S', 'M', 'L', 'XL'];
+                    return (
+                      <ToggleButton
+                        key={size}
+                        value={size}
+                        title={t(keys[index])}
+                        aria-label={t(keys[index])}
+                      >
+                        {labels[index]}
+                      </ToggleButton>
+                    );
+                  })}
+                </ToggleButtonGroup>
+                <ToggleButton
+                  size="small"
+                  selected={textBold}
+                  value="bold"
+                  title={t('mapDrawingTextBold')}
+                  aria-label={t('mapDrawingTextBold')}
+                  onChange={() => setTextBold((value) => !value)}
+                >
+                  <FormatBoldIcon fontSize="small" />
+                </ToggleButton>
+                <ToggleButton
+                  size="small"
+                  selected={textItalic}
+                  value="italic"
+                  title={t('mapDrawingTextItalic')}
+                  aria-label={t('mapDrawingTextItalic')}
+                  onChange={() => setTextItalic((value) => !value)}
+                >
+                  <FormatItalicIcon fontSize="small" />
+                </ToggleButton>
+              </div>
+            </>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={cancelText}>{t('sharedCancel')}</Button>
-          <Button onClick={saveText} disabled={!textValue.trim()}>
+          <Button onClick={cancelProperties}>{t('sharedCancel')}</Button>
+          <Button
+            onClick={saveProperties}
+            disabled={pendingProperties?.drawingType === 'text' && !textValue.trim()}
+          >
             {t('sharedSave')}
           </Button>
         </DialogActions>

@@ -189,6 +189,16 @@ export const staticDrawingFilter = (types, editingOwnerId) => {
     : ['all', typeFilter, ['!=', ['get', 'ownerId'], editingOwnerId]];
 };
 
+export const nextDrawingDeleteMode = (currentMode, requestedMode) =>
+  currentMode === requestedMode ? null : requestedMode;
+
+export const canDeleteDrawingInMode = (mode, drawing, user) => {
+  if (!drawing || !user) return false;
+  if (mode === 'own') return drawing.ownerId === user.id;
+  if (mode === 'foreign') return Boolean(user.administrator && drawing.ownerId !== user.id);
+  return false;
+};
+
 export const canEditDrawings = (user) =>
   Boolean(
     user?.administrator ||

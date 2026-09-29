@@ -670,6 +670,7 @@
     "mapDrawingCircle": "Draw circle",
     "mapDrawingText": "Add text",
     "mapDrawingEditText": "Edit text",
+    "mapDrawingProperties": "Drawing properties",
     "mapDrawingColor": "Drawing color",
     "mapDrawingDelete": "Delete drawing",
     "mapDrawingDeleteOther": "Delete another user’s drawing",
