@@ -21,6 +21,14 @@ import {
 } from './common/components/NativeInterface';
 import fetchOrThrow from './common/util/fetchOrThrow';
 import createRefreshScheduler from './common/util/refreshScheduler';
+import {
+  gameAlertDurationMs,
+  handledGameAlertsKey,
+  loadHandledGameAlerts,
+  parseGameAlerts,
+  saveHandledGameAlerts,
+  takeUnseenGameAlerts,
+} from './main/gameAlerts';
 
 const logoutCode = 4000;
 
@@ -30,14 +38,15 @@ const playAlarm = () => {
     alarmAudio = new Audio(alarm);
   }
   alarmAudio.currentTime = 0;
-  alarmAudio.play();
+  alarmAudio.play().catch(() => {});
 };
 
 const SocketController = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
 
-  const authenticated = useSelector((state) => Boolean(state.session.user));
+  const user = useSelector((state) => state.session.user);
+  const authenticated = Boolean(user);
   const includeLogs = useSelector((state) => state.session.includeLogs);
 
   const socketRef = useRef();
@@ -90,6 +99,8 @@ const SocketController = () => {
   }, []);
 
   const [notifications, setNotifications] = useState([]);
+  const [gameAlertQueue, setGameAlertQueue] = useState([]);
+  const handledGameAlertsRef = useRef({ key: null, values: new Map() });
 
   const soundEvents = useAttributePreference('soundEvents', '');
   const soundAlarms = useAttributePreference('soundAlarms', 'sos');
@@ -124,6 +135,28 @@ const SocketController = () => {
   const handleEventsRef = useRef(handleEvents);
   handleEventsRef.current = handleEvents;
 
+  const handleGameAlertPositions = useCallback(
+    (positions) => {
+      if (!user?.id) {
+        return;
+      }
+      const key = handledGameAlertsKey(window.location.origin, user.id);
+      if (handledGameAlertsRef.current.key !== key) {
+        handledGameAlertsRef.current = {
+          key,
+          values: loadHandledGameAlerts(window.localStorage, key),
+        };
+      }
+      const alerts = positions.flatMap((position) => parseGameAlerts(position, user));
+      const unseen = takeUnseenGameAlerts(alerts, handledGameAlertsRef.current.values);
+      if (unseen.length) {
+        saveHandledGameAlerts(window.localStorage, key, handledGameAlertsRef.current.values);
+        setGameAlertQueue((current) => [...current, ...unseen]);
+      }
+    },
+    [user],
+  );
+
   const connectSocketRef = useRef();
 
   const connectSocket = useCallback(() => {
@@ -153,7 +186,9 @@ const SocketController = () => {
         const positionsResponse = await fetch('/api/positions');
         if (socketRef.current !== socket) return;
         if (positionsResponse.ok) {
-          dispatch(sessionActions.updatePositions(await positionsResponse.json()));
+          const positions = await positionsResponse.json();
+          handleGameAlertPositions(positions);
+          dispatch(sessionActions.updatePositions(positions));
         }
         if (devicesResponse.status === 401 || positionsResponse.status === 401) {
           clearReconnectTimeout();
@@ -178,6 +213,7 @@ const SocketController = () => {
         dispatch(devicesActions.update(data.devices));
       }
       if (data.positions) {
+        handleGameAlertPositions(data.positions);
         dispatch(sessionActions.updatePositions(data.positions));
       }
       if (data.events) {
@@ -201,6 +237,7 @@ const SocketController = () => {
     dispatch,
     drawingRefreshScheduler,
     geofenceRefreshScheduler,
+    handleGameAlertPositions,
     navigate,
     userRefreshScheduler,
   ]);
@@ -290,6 +327,19 @@ const SocketController = () => {
     };
   }, [authenticated, connectSocket]);
 
+  useEffect(() => {
+    setGameAlertQueue([]);
+    handledGameAlertsRef.current = { key: null, values: new Map() };
+  }, [user?.id]);
+
+  const activeGameAlert = gameAlertQueue[0];
+
+  useEffect(() => {
+    if (activeGameAlert && document.visibilityState === 'visible') {
+      playAlarm();
+    }
+  }, [activeGameAlert]);
+
   return (
     <>
       {notifications.map((notification) => (
@@ -301,6 +351,14 @@ const SocketController = () => {
           onClose={() => setNotifications((prev) => prev.filter((e) => e.id !== notification.id))}
         />
       ))}
+      <Snackbar
+        key={activeGameAlert?.id}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+        open={Boolean(activeGameAlert)}
+        message={activeGameAlert?.message}
+        autoHideDuration={gameAlertDurationMs}
+        onClose={() => setGameAlertQueue((current) => current.slice(1))}
+      />
     </>
   );
 };
