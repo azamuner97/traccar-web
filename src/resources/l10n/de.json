@@ -1,5 +1,8 @@
 {
     "sharedLoading": "Lade...",
+    "gameNotificationsLoading": "Benachrichtigungsverlauf wird geladen…",
+    "gameNotificationsLoadFailed": "Benachrichtigungsverlauf konnte nicht geladen werden",
+    "gameNotificationsHistoryPages": "Seiten des Benachrichtigungsverlaufs",
     "gameNotificationsDismissBanner": "Benachrichtigung schließen",
     "gameNotificationsCloseHistory": "Benachrichtigungsverlauf schließen",
     "gameNotificationsUnread": "Ungelesene Spielbenachrichtigungen",

@@ -1,5 +1,8 @@
 {
     "sharedLoading": "Loading...",
+    "gameNotificationsLoading": "Loading notification history…",
+    "gameNotificationsLoadFailed": "Notification history could not be loaded",
+    "gameNotificationsHistoryPages": "Notification history pages",
     "gameNotificationsDismissBanner": "Dismiss notification",
     "gameNotificationsCloseHistory": "Close notification history",
     "gameNotificationsUnread": "Unread game notifications",

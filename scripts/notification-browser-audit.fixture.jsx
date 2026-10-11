@@ -1,4 +1,4 @@
-// Local, mocked browser audit only. This is not imported into the shipped app.
+// Local mocked API audit; never imported into the shipped application.
 import { StrictMode, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Provider, useSelector } from 'react-redux';
@@ -12,6 +12,7 @@ import dimensions from '../src/common/theme/dimensions';
 import EventsDrawer from '../src/main/EventsDrawer';
 import MapNotification from '../src/map/control/MapNotification';
 import { gameAlertSessionDeviceId } from '../src/main/gameAlerts';
+import { gameNotificationCache } from '../src/main/gameNotificationCache';
 
 const sockets = [];
 class AuditSocket {
@@ -46,10 +47,43 @@ let serverUser = {
   },
 };
 const tokenWrites = [];
+const serverKey = 'notificationAuditServer';
+let sessions = JSON.parse(window.sessionStorage.getItem(serverKey) || '{}');
+let failing = false;
+const getSession = (id) => {
+  sessions[id] ||= { generation: window.crypto.randomUUID(), records: [] };
+  return sessions[id];
+};
+const saveServer = () => window.sessionStorage.setItem(serverKey, JSON.stringify(sessions));
+getSession(900);
+saveServer();
+const invalidate = () =>
+  sockets.at(-1)?.onmessage?.({
+    data: JSON.stringify({ invalidate: ['game-notifications'] }),
+  });
 window.fetch = async (url, options = {}) => {
+  const parsed = new URL(url, window.location.origin);
   let value = [];
-  if (url === '/api/session') value = serverUser;
-  if (url === '/api/users/5' && options.method === 'PUT') {
+  if (parsed.pathname === '/api/game-notifications') {
+    if (failing) return new Response('{}', { status: typeof failing === 'number' ? failing : 503 });
+    const deviceId = Number(parsed.searchParams.get('sessionDeviceId'));
+    const session = getSession(deviceId);
+    const generation = parsed.searchParams.get('generation');
+    if (generation && generation !== session.generation) return new Response('{}', { status: 409 });
+    const offset = Number(parsed.searchParams.get('after') || 0);
+    const limit = Number(parsed.searchParams.get('limit') || 100);
+    const items = session.records.slice(offset, offset + limit);
+    value = {
+      version: 1,
+      sessionDeviceId: deviceId,
+      generation: session.generation,
+      items,
+      nextCursor: String(offset + items.length),
+      hasMore: offset + items.length < session.records.length,
+    };
+  }
+  if (parsed.pathname === '/api/session') value = serverUser;
+  if (parsed.pathname === '/api/users/5' && options.method === 'PUT') {
     serverUser = JSON.parse(options.body);
     tokenWrites.push(serverUser.attributes.notificationTokens);
     value = serverUser;
@@ -70,7 +104,6 @@ window.Audio = class {
     return Promise.resolve();
   }
 };
-
 store.dispatch(sessionActions.updateServer({ attributes: {} }));
 store.dispatch(sessionActions.updateUser(serverUser));
 const Fixture = () => {
@@ -116,7 +149,12 @@ createRoot(document.getElementById('root')).render(
   </StrictMode>,
 );
 
+const updateUser = (changes) => {
+  serverUser = { ...serverUser, attributes: { ...serverUser.attributes, ...changes } };
+  store.dispatch(sessionActions.updateUser(serverUser));
+};
 window.notificationAudit = {
+  flushHistory: () => gameNotificationCache.flush(),
   get sockets() {
     return sockets.length;
   },
@@ -138,56 +176,69 @@ window.notificationAudit = {
   login() {
     store.dispatch(sessionActions.updateUser(serverUser));
   },
-  setSession(deviceId) {
-    serverUser = {
-      ...serverUser,
-      attributes: { ...serverUser.attributes, traccarToolSessionDeviceId: deviceId },
-    };
-    store.dispatch(sessionActions.updateUser(serverUser));
-  },
-  disableEvents(value) {
-    serverUser = {
-      ...serverUser,
-      attributes: { ...serverUser.attributes, 'ui.disableEvents': value },
-    };
-    store.dispatch(sessionActions.updateUser(serverUser));
-  },
-  setLanguage(value) {
-    serverUser = { ...serverUser, attributes: { ...serverUser.attributes, language: value } };
-    store.dispatch(sessionActions.updateUser(serverUser));
-  },
-  nativeEvent(event) {
-    sockets.at(-1).onmessage?.({ data: JSON.stringify({ events: [event] }) });
-  },
-  refreshUser() {
-    store.dispatch(
-      sessionActions.updateUser({ ...serverUser, attributes: { ...serverUser.attributes } }),
-    );
-  },
   logout() {
     store.dispatch(sessionActions.updateUser(null));
   },
+  setSession(id) {
+    updateUser({ traccarToolSessionDeviceId: id });
+  },
   setRole(role) {
-    serverUser = {
-      ...serverUser,
-      attributes: { ...serverUser.attributes, traccarToolUserRole: role },
-    };
-    store.dispatch(sessionActions.updateUser(serverUser));
+    updateUser({ traccarToolUserRole: role });
+  },
+  disableEvents(value) {
+    updateUser({ 'ui.disableEvents': value });
+  },
+  setLanguage(language) {
+    updateUser({ language });
+  },
+  refreshUser() {
+    updateUser({});
   },
   setVisible(value) {
     visible = value;
     document.dispatchEvent(new Event('visibilitychange'));
   },
+  fail(value) {
+    failing = value;
+    invalidate();
+  },
+  reconnect() {
+    invalidate();
+  },
+  nativeEvent(event) {
+    sockets.at(-1)?.onmessage?.({ data: JSON.stringify({ events: [event] }) });
+  },
   emit(alerts, deviceId = 900) {
-    sockets.at(-1).onmessage?.({
+    const session = getSession(deviceId);
+    for (const alert of alerts)
+      if (!session.records.some((entry) => entry.id === alert.id))
+        session.records.push({
+          ...alert,
+          gameStateDeviceId: deviceId,
+          generation: session.generation,
+        });
+    saveServer();
+    invalidate();
+  },
+  reset(deviceId = 900, alerts = []) {
+    const generation = window.crypto.randomUUID();
+    sessions[deviceId] = {
+      generation,
+      records: alerts.map((alert) => ({ ...alert, generation, gameStateDeviceId: deviceId })),
+    };
+    saveServer();
+    invalidate();
+  },
+  spoof(alert) {
+    sockets.at(-1)?.onmessage?.({
       data: JSON.stringify({
         positions: [
           {
-            deviceId,
+            deviceId: 900,
             attributes: {
               traccarToolGameState: true,
               traccarToolAlertsVersion: 1,
-              traccarToolAlerts: JSON.stringify(alerts),
+              traccarToolAlerts: JSON.stringify([alert]),
             },
           },
         ],
@@ -195,6 +246,6 @@ window.notificationAudit = {
     });
   },
   malformed() {
-    sockets.at(-1).onmessage?.({ data: '{bad' });
+    sockets.at(-1)?.onmessage?.({ data: '{bad' });
   },
 };

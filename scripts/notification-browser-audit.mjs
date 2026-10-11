@@ -116,10 +116,20 @@ try {
     await page.clock.fastForward(400);
   };
 
-  // New arrivals preempt the real Snackbar and sound immediately in StrictMode.
+  const waitForHistory = (count) =>
+    page.waitForFunction(
+      (value) =>
+        window.notificationAudit.history.items.length === value &&
+        !window.notificationAudit.history.loading,
+      count,
+    );
+  const synchronize = async () => {
+    await page.evaluate(() => window.notificationAudit.reconnect());
+    await page.waitForFunction(() => !window.notificationAudit.history.loading);
+    await page.clock.fastForward(100);
+  };
+  // Actual Snackbar replacement, independent 60s timeout and one-time sound.
   const first = await makeAlert('first');
-  const second = await makeAlert('second', true);
-  const third = await makeAlert('third', true);
   await emit([first]);
   await banner.getByText(first.message).waitFor();
   assert.equal(await soundCount(), 1);
@@ -127,33 +137,28 @@ try {
   assert.match(await mapButton.getAttribute('class'), /active/);
   await page.mouse.click(10, 400);
   await page.clock.fastForward(59000);
-  assert.equal(await banner.getByText(first.message).count(), 1, 'banner remains for 60 seconds');
-  await emit([first, second]);
+  assert.equal(await banner.getByText(first.message).count(), 1);
+  const second = await makeAlert('second', true);
+  await emit([second]);
   await banner.getByText(second.message).waitFor();
-  assert.equal(await soundCount(), 2, 'new alert sounds without closing the previous banner');
+  assert.equal(await soundCount(), 2);
   assert.equal(await banner.getByText(first.message).count(), 0);
   await page.clock.fastForward(2000);
-  assert.equal(
-    await banner.getByText(second.message).count(),
-    1,
-    'old timeout cannot close replacement',
-  );
-  await emit([third, first, second]);
-  await banner.getByText(third.message).waitFor();
-  assert.equal(await soundCount(), 3);
+  assert.equal(await banner.getByText(second.message).count(), 1);
   await page.clock.fastForward(59000);
-  assert.equal(
-    await banner.getByText(third.message).count(),
-    1,
-    'replacement gets its own 60 seconds',
+  assert.equal(await banner.count(), 0);
+  assert.equal(await unreadCount(), 2);
+  await synchronize();
+  assert.equal(await soundCount(), 2, 'reconnect cannot replay an alarm');
+  const spoofed = await makeAlert('spoofed');
+  await page.evaluate((alert) => window.notificationAudit.spoof(alert), spoofed);
+  await page.clock.fastForward(100);
+  assert.ok(
+    !(await historyIds()).includes('spoofed'),
+    'device uploads are not notification authority',
   );
-  await page.clock.fastForward(1500);
-  assert.equal(await banner.count(), 0, 'superseded banners never reappear');
-  assert.equal(await unreadCount(), 3, 'banner close does not mark history read');
-  await emit([first, second, third]);
-  assert.equal(await soundCount(), 3, 'reconnect batch cannot replay');
 
-  // Real drawer, date rendering, non-navigable game entries and unread semantics.
+  // Drawer, dates, unread indicator and visible/hidden handling.
   await openHistory();
   await drawer.getByText(first.message).waitFor();
   assert.equal(await unreadCount(), 0);
@@ -161,11 +166,11 @@ try {
   assert.ok(await drawer.getByText(/\d{2}\.\d{2}\.\d{4}.*\(Europe\/Zurich\)/).count());
   await drawer.getByText(first.message).click();
   assert.equal(await page.getByTestId('audit-route').textContent(), '/');
-  const fourth = await makeAlert('fourth', true);
-  await emit([fourth]);
-  await drawer.getByText(fourth.message).waitFor();
-  assert.equal(await unreadCount(), 0, 'arrivals in a visible drawer are read');
-  assert.equal(await soundCount(), 4);
+  const third = await makeAlert('third', true);
+  await emit([third]);
+  await drawer.getByText(third.message).waitFor();
+  assert.equal(await unreadCount(), 0);
+  assert.equal(await soundCount(), 3);
   assert.ok(
     await page.evaluate(
       () =>
@@ -173,102 +178,90 @@ try {
           getComputedStyle(document.querySelector('.MuiSnackbar-anchorOriginTopCenter')).zIndex,
         ) < Number(getComputedStyle(document.querySelector('.MuiDrawer-root')).zIndex),
     ),
-    'banner must not cover drawer controls',
   );
   await page.evaluate(() => window.notificationAudit.setVisible(false));
   const hidden = await makeAlert('hidden', true);
   await emit([hidden]);
+  await waitForHistory(4);
+  assert.equal(await unreadCount(), 1);
+  assert.equal(await soundCount(), 3);
   await page.clock.fastForward(20000);
-  assert.equal(await unreadCount(), 1, 'hidden drawer does not mark arrivals read');
-  assert.equal(await soundCount(), 4);
   await page.evaluate(() => window.notificationAudit.setVisible(true));
-  await page.clock.fastForward(300);
-  assert.equal(await unreadCount(), 0);
   await banner.getByText(hidden.message).waitFor();
-  assert.equal(await soundCount(), 5, 'newest hidden arrival sounds once on returning');
-  await page.evaluate(() => window.notificationAudit.setVisible(false));
-  await page.evaluate(() => window.notificationAudit.setVisible(true));
-  await page.clock.fastForward(300);
-  assert.equal(await soundCount(), 5, 'returning again does not replay the current alarm');
-  if (process.env.TRACCAR_AUDIT_SCREENSHOT) {
-    await page.setViewportSize({ width: 390, height: 844 });
-    await page.screenshot({ path: process.env.TRACCAR_AUDIT_SCREENSHOT });
-  }
+  assert.equal(await soundCount(), 4);
+  assert.equal(await unreadCount(), 0);
+  await page.evaluate(() => {
+    window.notificationAudit.setVisible(false);
+    window.notificationAudit.setVisible(true);
+  });
+  await synchronize();
+  assert.equal(await soundCount(), 4);
   await drawer
     .locator('.MuiListItem-root')
     .filter({ hasText: first.message })
     .getByRole('button', { name: 'Delete history entry' })
     .click();
-  await emit([first]);
-  assert.ok(!(await historyIds()).includes('first'), 'deleted history is not restored by replay');
-  assert.equal(await soundCount(), 5);
-  // Existing native events keep their own server navigation and red-icon behavior.
+  await synchronize();
+  assert.ok(!(await historyIds()).includes('first'));
+  assert.equal(await soundCount(), 4);
+
+  // Native events remain distinct and navigable.
   await page.evaluate(() =>
     window.notificationAudit.nativeEvent({
       id: 77,
       deviceId: 123,
       type: 'deviceOnline',
       eventTime: new Date().toISOString(),
-      attributes: { message: 'Native example' },
+      attributes: {},
     }),
   );
-  const nativeRow = drawer.locator('.MuiListItemButton-root');
-  await nativeRow.waitFor();
-  await nativeRow.click();
+  await drawer.locator('.MuiListItemButton-root').click();
   await page.waitForFunction(
     () => document.querySelector('[data-testid="audit-route"]').textContent === '/event/77',
   );
   assert.equal(await page.getByTestId('audit-route').textContent(), '/event/77');
-  assert.match(await mapButton.getAttribute('class'), /active/);
   await drawer.getByRole('button', { name: 'Clear event and notification history' }).click();
   assert.deepEqual(await historyIds(), []);
-  assert.doesNotMatch(await mapButton.getAttribute('class'), /active/);
   await closeHistory();
   await banner.getByText(hidden.message).waitFor();
-  assert.equal(await soundCount(), 5);
   await dismiss();
-  assert.equal(await banner.count(), 0, 'dismissal does not bring back the preempted fourth alert');
+  assert.equal(await banner.count(), 0);
+  await synchronize();
+  assert.deepEqual(await historyIds(), [], 'clear cutoff survives fetching the same journal');
 
-  // Same-user refresh and native-token regression checks remain covered.
   const socketCount = await page.evaluate(() => window.notificationAudit.sockets);
   await page.evaluate(() => {
     window.notificationAudit.refreshUser();
     window.notificationAudit.malformed();
   });
-  await page.clock.fastForward(500);
+  await page.clock.fastForward(100);
   assert.equal(await page.evaluate(() => window.notificationAudit.sockets), socketCount);
   await page.evaluate(() => window.updateNotificationToken('four'));
   await page.waitForFunction(() => window.notificationAudit.tokens === 'one,two,three,four');
-  assert.equal(await page.evaluate(() => window.notificationAudit.sockets), socketCount);
   await page.evaluate(() =>
     window.handleNativeNotification({ notification: { body: 'Announcement' } }),
   );
 
-  // Reload must restore history/read status, without sounding or replaying banners.
+  // IndexedDB persists read flags, handled IDs and deletion tombstones.
+  await page.clock.fastForward(1000);
   const saved = await makeAlert('saved', true);
   await emit([saved]);
   await banner.getByText(saved.message).waitFor();
   await dismiss();
   await openHistory();
   await closeHistory();
-  await page.evaluate(() => {
-    window.localStorage.removeItem(`traccarToolHandledAlerts:${window.location.origin}:5`);
-  });
+  await page.evaluate(() => window.notificationAudit.flushHistory());
   await page.reload();
   await page.waitForFunction(() => window.notificationAudit?.sockets > 0);
+  await waitForHistory(1);
   assert.deepEqual(await historyIds(), ['saved']);
   assert.equal(await unreadCount(), 0);
-  assert.equal(await soundCount(), 0, 'hydration is silent');
-  await emit([saved]);
-  await page.clock.fastForward(500);
-  assert.equal(
-    await banner.count(),
-    0,
-    'persisted history suppresses replay even without the old ID cache',
-  );
+  assert.equal(await soundCount(), 0);
+  assert.equal(await banner.count(), 0);
+  await synchronize();
+  assert.deepEqual(await historyIds(), ['saved']);
   assert.equal(await soundCount(), 0);
 
-  // History remains reachable with native events disabled; German labels are usable.
   await page.evaluate(() => window.notificationAudit.disableEvents(true));
   await mapButton.waitFor();
   await page.evaluate(() => window.notificationAudit.setLanguage('de'));
@@ -277,116 +270,194 @@ try {
   await drawer.getByRole('button', { name: 'Benachrichtigungsverlauf schließen' }).click();
   await page.clock.fastForward(400);
   await page.evaluate(() => window.notificationAudit.setLanguage('en'));
-  await mapButton.waitFor();
 
-  // Hidden stale banners do not play; their already-received history stays for 24h.
+  // Retained hidden alerts go stale without alarming; history never expires.
   await page.evaluate(() => window.notificationAudit.setVisible(false));
   const expired = await makeAlert('expired', true);
   await emit([expired]);
+  await waitForHistory(2);
   await page.clock.fastForward(16 * 60 * 1000);
   await page.evaluate(() => window.notificationAudit.setVisible(true));
-  await page.clock.fastForward(500);
+  await synchronize();
   assert.equal(await banner.count(), 0);
   assert.equal(await soundCount(), 0);
-  assert.ok((await historyIds()).includes('expired'));
-  await page.clock.fastForward(24 * 60 * 60 * 1000 + 1000);
-  assert.deepEqual(await historyIds(), [], 'expiry timer prunes without another incoming event');
-  assert.doesNotMatch(await mapButton.getAttribute('class'), /active/);
+  await page.clock.fastForward(25 * 60 * 60 * 1000);
+  await synchronize();
+  assert.ok((await historyIds()).includes('expired'), 'no 24-hour history limit');
 
-  // Permission/session changes and logout clear presentation, not another user's history.
-  await page.evaluate(() => window.notificationAudit.setVisible(false));
-  const revoked = { ...(await makeAlert('revoked')), audience: 'participants' };
-  await emit([revoked]);
-  await page.evaluate(() => window.notificationAudit.setRole('hunter'));
-  await page.evaluate(() => window.notificationAudit.setVisible(true));
-  await page.clock.fastForward(500);
-  assert.equal(await banner.count(), 0);
-  assert.equal(await soundCount(), 0);
-  assert.deepEqual(await historyIds(), []);
-  const catchAlert = await makeAlert('session-catch', true);
-  await emit([catchAlert]);
-  await banner.getByText(catchAlert.message).waitFor();
-  await dismiss();
-  await page.evaluate(() => window.notificationAudit.setSession(901));
-  assert.deepEqual(await historyIds(), []);
-  await page.evaluate(() => window.notificationAudit.setSession(900));
-  assert.deepEqual(await historyIds(), ['session-catch']);
-  await page.evaluate(() => window.notificationAudit.logout());
-  await page.clock.fastForward(500);
-  await emit([await makeAlert('after-logout', true)]);
-  assert.deepEqual(await historyIds(), []);
-  assert.equal(await banner.count(), 0);
-  await page.evaluate(() => window.notificationAudit.login());
-  await page.waitForFunction(() => window.notificationAudit.history.items.length === 1);
-  assert.equal(await soundCount(), 1, 'login hydration does not play another alarm');
-  // Restricted storage must not prevent new in-memory history or banner dismissal.
-  await page.evaluate(() => {
-    const descriptor = Object.getOwnPropertyDescriptor(window, 'localStorage');
-    window.notificationAudit.restoreStorage = () =>
-      Object.defineProperty(window, 'localStorage', descriptor);
-    Object.defineProperty(window, 'localStorage', {
-      configurable: true,
-      get() {
-        throw new Error('Storage denied');
-      },
-    });
-  });
-  const blocked = await makeAlert('blocked-storage', true);
-  await emit([blocked]);
-  await banner.getByText(blocked.message).waitFor();
-  assert.ok((await historyIds()).includes('blocked-storage'));
-  await dismiss();
+  // Full-session paging after hours offline: all history, newest fresh banner only.
+  await page.evaluate(() => window.notificationAudit.reset());
+  await waitForHistory(0);
+  const beforeArchive = await soundCount();
+  await page.evaluate(() =>
+    window.notificationAudit.emit(
+      Array.from({ length: 250 }, (_, i) => ({
+        id: 'archive-' + i,
+        type: 'speedhunt',
+        audience: 'session',
+        occurredAt: '2026-01-01T00:00:00Z',
+        timeZone: 'Europe/Zurich',
+        message: '[01:00:00] Archive ' + i,
+      })),
+    ),
+  );
+  await waitForHistory(250);
+  assert.equal(await soundCount(), beforeArchive);
+  assert.equal(await unreadCount(), 250);
   await openHistory();
-  await drawer.getByText(blocked.message).waitFor();
+  assert.equal(await drawer.locator('.MuiListItem-root').count(), 100);
+  await drawer.getByRole('button', { name: 'Go to page 3', exact: true }).click();
+  assert.equal(await drawer.locator('.MuiListItem-root').count(), 50);
   assert.equal(await unreadCount(), 0);
   await closeHistory();
-  await page.evaluate(() => window.notificationAudit.restoreStorage());
-
-  // Reconnect batches select by occurrence, not wire order, and keep all history.
   const batchOlder = await makeAlert('batch-older', true);
   await page.clock.fastForward(1000);
   const batchNewest = await makeAlert('batch-newest', true);
-  const beforeBatch = await soundCount();
   await emit([batchNewest, batchOlder]);
   await banner.getByText(batchNewest.message).waitFor();
-  assert.equal(await banner.getByText(batchOlder.message).count(), 0);
-  assert.equal(await soundCount(), beforeBatch + 1);
-  assert.ok((await historyIds()).includes(batchOlder.id));
-  assert.ok((await historyIds()).includes(batchNewest.id));
-  await emit([batchOlder, batchNewest]);
-  assert.equal(await soundCount(), beforeBatch + 1, 'replayed batch cannot replace or sound');
+  assert.equal(await soundCount(), beforeArchive + 1);
+  await synchronize();
+  assert.equal(await soundCount(), beforeArchive + 1);
   await dismiss();
-  assert.equal(await banner.count(), 0);
 
-  // Updated Speedhunt and test notifications use the identical UI/sound/history
-  // path for every session role, including hunters and the spectator account.
+  // Loading failure retains valid cache, then recovery; reset wipes local state.
+  await page.evaluate(() => window.notificationAudit.fail(true));
+  await page.waitForFunction(() => Boolean(window.notificationAudit.history.error));
+  assert.equal((await historyIds()).length, 252);
+  await openHistory();
+  await drawer.getByRole('alert').waitFor();
+  assert.equal(
+    await drawer.locator('.MuiListItem-root').count(),
+    100,
+    'reopening starts with newest history',
+  );
+  await drawer.getByText(batchNewest.message, { exact: true }).waitFor();
+  await page.evaluate(() => window.notificationAudit.fail(false));
+  await page.waitForFunction(() => !window.notificationAudit.history.error);
+  await closeHistory();
+  const permissionBanner = await makeAlert('permission-banner');
+  await emit([permissionBanner]);
+  await banner.getByText(permissionBanner.message).waitFor();
+  const beforeRevocation = await soundCount();
+  await page.evaluate(() => window.notificationAudit.fail(403));
+  await waitForHistory(0);
+  await page.clock.fastForward(400);
+  assert.equal(await banner.count(), 0, 'permission denial clears an active banner');
+  await page.evaluate(() => window.notificationAudit.fail(false));
+  await waitForHistory(253);
+  assert.equal(
+    await soundCount(),
+    beforeRevocation,
+    'permission restoration does not replay alarms',
+  );
+  const resetBanner = await makeAlert('reset-banner');
+  await emit([resetBanner]);
+  await banner.getByText(resetBanner.message).waitFor();
+  await page.evaluate(() => window.notificationAudit.reset());
+  await waitForHistory(0);
+  await page.clock.fastForward(500);
+  assert.equal(await banner.count(), 0);
+  assert.equal(await unreadCount(), 0);
+  assert.deepEqual(await page.evaluate(() => window.notificationAudit.history.handled), []);
+  await page.evaluate(() => window.notificationAudit.flushHistory());
+  await page.reload();
+  await page.waitForFunction(() => window.notificationAudit?.sockets > 0);
+  await waitForHistory(0);
+  assert.equal(await soundCount(), 0);
+
+  // Reusing an ID in a fresh generation must not inherit the old banner timer.
+  const oldGenerationBanner = await makeAlert('generation-reused-id', true);
+  await emit([oldGenerationBanner]);
+  await banner.getByText(oldGenerationBanner.message).waitFor();
+  await page.mouse.move(10, 400);
+  await page.clock.fastForward(50000);
+  const newGenerationBanner = await makeAlert('generation-reused-id', true);
+  await page.evaluate((alert) => window.notificationAudit.reset(900, [alert]), newGenerationBanner);
+  await banner.getByText(newGenerationBanner.message).waitFor();
+  await page.clock.fastForward(11000);
+  assert.equal(await banner.count(), 1, 'new generation receives a fresh 60-second banner timer');
+  await page.clock.fastForward(51000);
+  assert.equal(await banner.count(), 0, 'new generation banner also expires after 60 seconds');
+  await page.evaluate(() => window.notificationAudit.reset());
+  await waitForHistory(0);
+
+  // Every generated role, account/session isolation, and logout.
   for (const role of ['player', 'supporter', 'hunter', 'spectator']) {
     await page.evaluate((value) => window.notificationAudit.setRole(value), role);
-    const speedhunt = await makeAlert(`speedhunt-${role}`);
-    const testNotification = {
-      ...(await makeAlert(`test-${role}`)),
+    await page.clock.fastForward(1000);
+    const speedhunt = await makeAlert('speedhunt-' + role);
+    const test = {
+      ...(await makeAlert('test-' + role)),
       type: 'notificationTest',
       message: speedhunt.message.replace(
         'Speedhunt: Ping 1 out of 4 sent.',
         'Test notification: check that your phone plays a sound.',
       ),
     };
-    const beforeRole = await soundCount();
+    const before = await soundCount();
     await emit([speedhunt]);
     await banner.getByText(speedhunt.message).waitFor();
-    assert.equal(await soundCount(), beforeRole + 1);
-    await emit([testNotification]);
-    await banner.getByText(testNotification.message).waitFor();
-    assert.equal(await soundCount(), beforeRole + 2);
-    assert.ok((await historyIds()).includes(speedhunt.id));
-    assert.ok((await historyIds()).includes(testNotification.id));
-    await emit([speedhunt, testNotification]);
-    assert.equal(await soundCount(), beforeRole + 2, 'all-role replay must remain silent');
+    await emit([test]);
+    await banner.getByText(test.message).waitFor();
+    assert.equal(await soundCount(), before + 2);
     await dismiss();
   }
+  await page.evaluate(() => window.notificationAudit.setRole('unrelated'));
+  assert.deepEqual(await historyIds(), []);
+  await page.evaluate(() => window.notificationAudit.setRole('player'));
+  await waitForHistory(8);
+  const beforeIsolation = await soundCount();
+  await page.evaluate(() => window.notificationAudit.setSession(901));
+  await waitForHistory(0);
+  await page.evaluate(() => window.notificationAudit.setSession(900));
+  await waitForHistory(8);
+  assert.equal(await soundCount(), beforeIsolation);
+  await page.evaluate(() => window.notificationAudit.logout());
+  assert.deepEqual(await historyIds(), []);
+  assert.equal(await banner.count(), 0);
+  await page.evaluate(() => window.notificationAudit.login());
+  await waitForHistory(8);
+  assert.equal(await soundCount(), beforeIsolation);
+  if (process.env.TRACCAR_AUDIT_SCREENSHOT) {
+    await openHistory();
+    await page.screenshot({ path: process.env.TRACCAR_AUDIT_SCREENSHOT });
+  }
+
+  // A separate phone with denied IndexedDB still has working in-memory delivery.
+  const denied = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  denied.on('pageerror', (error) => errors.push(error.message));
+  await denied.addInitScript(() =>
+    Object.defineProperty(window, 'indexedDB', {
+      configurable: true,
+      get() {
+        throw new Error('Storage denied');
+      },
+    }),
+  );
+  await denied.goto(`${server.resolvedUrls.local[0]}__notification_audit__`);
+  await denied.waitForFunction(() => window.notificationAudit?.sockets > 0);
+  await denied.evaluate(() =>
+    window.notificationAudit.emit([
+      {
+        id: 'denied',
+        type: 'notificationTest',
+        audience: 'session',
+        occurredAt: new Date().toISOString(),
+        timeZone: 'UTC',
+        message: '[12:00:00] Test notification',
+      },
+    ]),
+  );
+  await denied
+    .locator('.MuiSnackbar-anchorOriginTopCenter')
+    .getByText('[12:00:00] Test notification')
+    .waitFor();
+  assert.equal(await denied.evaluate(() => window.notificationAudit.history.items.length), 1);
+  await denied.getByRole('button', { name: 'Dismiss notification' }).click();
+  await denied.close();
   assert.deepEqual(errors, []);
   console.log(
-    `${mobileManager ? 'Mobile Manager bridge' : 'Browser'} notification audit passed: instant newest-alert preemption/sound, fresh 60s timeout/dismissal, actual drawer/map icon, unread/hidden state, merged navigation, dates, deletion/dedup, reload, expiry, permissions, four phones and logout.`,
+    `${mobileManager ? 'Mobile Manager bridge' : 'Desktop'} database notification audit passed: API recovery, IndexedDB, >100/>24h history, paged drawer, deletion, reset, unread, timeout, replacement, permissions and sound.`,
   );
 } finally {
   await browser?.close();

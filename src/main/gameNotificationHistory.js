@@ -5,67 +5,50 @@ import {
   isValidGameAlert,
 } from './gameAlerts.js';
 
-export const gameNotificationHistoryAgeMs = 24 * 60 * 60 * 1000;
-export const gameNotificationHistoryLimit = 100;
+export const isNotificationGeneration = (value) =>
+  typeof value === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
 
-export const gameNotificationHistoryKey = (origin, user) => {
-  const deviceId = gameAlertSessionDeviceId(user);
-  return Number.isSafeInteger(user?.id) && user.id > 0 && deviceId
-    ? `traccarToolNotificationHistory:${origin}:${user.id}:${deviceId}`
+export const gameNotificationAccountKey = (origin, user) =>
+  Number.isSafeInteger(user?.id) && user.id > 0 && gameAlertSessionDeviceId(user)
+    ? JSON.stringify([origin, user.id, gameAlertSessionDeviceId(user)])
     : null;
-};
 
-export const retainGameNotificationHistory = (items, user, now = Date.now()) => {
+export const gameNotificationHistoryKey = (origin, user, generation) =>
+  gameNotificationAccountKey(origin, user) && isNotificationGeneration(generation)
+    ? JSON.stringify([origin, user.id, gameAlertSessionDeviceId(user), generation])
+    : null;
+
+export const retainGameNotificationHistory = (items, user, generation, now = Date.now()) => {
   const retained = new Map();
   for (const item of Array.isArray(items) ? items : []) {
     if (
       !isValidGameAlert(item) ||
       typeof item.read !== 'boolean' ||
-      !isGameAlertInWindow(item, gameNotificationHistoryAgeMs, now) ||
+      item.generation !== generation ||
+      !isGameAlertInWindow(item, Infinity, now) ||
       !canReceiveGameAlert(item, user) ||
       retained.has(item.id)
     )
       continue;
-    const record = {
+    retained.set(item.id, {
       id: item.id,
       type: item.type,
       audience: item.audience,
       occurredAt: item.occurredAt,
+      timeZone: item.timeZone,
       message: item.message,
-      gameStateDeviceId: gameAlertSessionDeviceId(user),
+      gameStateDeviceId: item.gameStateDeviceId,
+      generation,
       read: item.read,
-    };
-    if (Object.hasOwn(item, 'timeZone')) record.timeZone = item.timeZone;
-    retained.set(item.id, record);
+    });
   }
-  return [...retained.values()]
-    .sort((left, right) => Date.parse(right.occurredAt) - Date.parse(left.occurredAt))
-    .slice(0, gameNotificationHistoryLimit);
-};
-
-export const loadGameNotificationHistory = (storage, key, user, now = Date.now()) => {
-  try {
-    const value = JSON.parse(storage?.getItem(key) || 'null');
-    return value?.version === 1 ? retainGameNotificationHistory(value.items, user, now) : [];
-  } catch {
-    return [];
-  }
-};
-
-export const saveGameNotificationHistory = (storage, key, items) => {
-  if (!key) return;
-  try {
-    storage?.setItem(key, JSON.stringify({ version: 1, items }));
-  } catch {
-    // The Redux history remains available when browser storage is restricted.
-  }
+  return [...retained.values()].sort((a, b) => Date.parse(b.occurredAt) - Date.parse(a.occurredAt));
 };
 
 export const formatGameNotificationTime = (alert) => {
-  const timeZone = alert.timeZone || 'UTC';
   const parts = Object.fromEntries(
     new Intl.DateTimeFormat('en-GB', {
-      timeZone,
+      timeZone: alert.timeZone,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -77,11 +60,11 @@ export const formatGameNotificationTime = (alert) => {
       .formatToParts(new Date(alert.occurredAt))
       .map(({ type, value }) => [type, value]),
   );
-  return `${parts.day}.${parts.month}.${parts.year} ${parts.hour}:${parts.minute}:${parts.second} (${timeZone})`;
+  return `${parts.day}.${parts.month}.${parts.year} ${parts.hour}:${parts.minute}:${parts.second} (${alert.timeZone})`;
 };
 
 export const mergeNotificationEntries = (events, notifications) =>
   [
     ...events.map((item) => ({ kind: 'event', item, time: Date.parse(item.eventTime) || 0 })),
     ...notifications.map((item) => ({ kind: 'game', item, time: Date.parse(item.occurredAt) })),
-  ].sort((left, right) => right.time - left.time);
+  ].sort((a, b) => b.time - a.time);

@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { IconButton, Snackbar } from '@mui/material';
-import CloseIcon from '@mui/icons-material/Close';
+import { Snackbar } from '@mui/material';
 import {
   devicesActions,
   drawingsActions,
   errorsActions,
   geofencesActions,
   sessionActions,
-  gameNotificationsActions,
 } from './store';
 import { useCatchCallback } from './reactHelper';
 import { snackBarDurationLongMs } from './common/util/duration';
@@ -23,24 +21,8 @@ import {
 } from './common/components/NativeInterface';
 import fetchOrThrow from './common/util/fetchOrThrow';
 import createRefreshScheduler from './common/util/refreshScheduler';
-import { useTranslation } from './common/components/LocalizationProvider';
-import {
-  gameNotificationHistoryAgeMs,
-  gameNotificationHistoryKey,
-} from './main/gameNotificationHistory';
-import {
-  gameAlertDurationMs,
-  replaceGameAlertQueue,
-  closeGameAlertQueue,
-  canReceiveGameAlert,
-  gameAlertStorage,
-  handledGameAlertsKey,
-  isFreshGameAlert,
-  loadHandledGameAlerts,
-  parseGameAlerts,
-  saveHandledGameAlerts,
-  takeUnseenGameAlerts,
-} from './main/gameAlerts';
+import GameNotificationsController from './main/GameNotificationsController';
+import { requestGameNotificationSync } from './main/gameNotificationSync';
 
 const logoutCode = 4000;
 
@@ -60,14 +42,10 @@ const playAlarm = () => {
 const SocketController = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const t = useTranslation();
 
   const user = useSelector((state) => state.session.user);
   const authenticated = Boolean(user);
   const includeLogs = useSelector((state) => state.session.includeLogs);
-  const gameHistory = useSelector((state) => state.gameNotifications);
-  const gameHistoryRef = useRef(gameHistory);
-  gameHistoryRef.current = gameHistory;
   const userRef = useRef(user);
   userRef.current = user;
   const includeLogsRef = useRef(includeLogs);
@@ -123,11 +101,6 @@ const SocketController = () => {
   }, []);
 
   const [notifications, setNotifications] = useState([]);
-  const [gameAlertQueue, setGameAlertQueue] = useState({ key: null, alerts: [] });
-  const [visible, setVisible] = useState(document.visibilityState === 'visible');
-  const playedGameAlertRef = useRef(null);
-  const handledGameAlertsRef = useRef({ key: null, values: new Map() });
-
   const soundEvents = useAttributePreference('soundEvents', '');
   const soundAlarms = useAttributePreference('soundAlarms', 'sos');
 
@@ -161,57 +134,6 @@ const SocketController = () => {
   const handleEventsRef = useRef(handleEvents);
   handleEventsRef.current = handleEvents;
 
-  const handleGameAlertPositions = useCallback(
-    (positions) => {
-      const currentUser = userRef.current;
-      if (!currentUser?.id || !Array.isArray(positions)) {
-        return;
-      }
-      const key = handledGameAlertsKey(window.location.origin, currentUser.id);
-      const storage = gameAlertStorage();
-      if (handledGameAlertsRef.current.key !== key) {
-        handledGameAlertsRef.current = {
-          key,
-          values: loadHandledGameAlerts(storage, key),
-        };
-      }
-      const alerts = positions.flatMap((position) =>
-        parseGameAlerts(position, currentUser).map((alert) => ({
-          ...alert,
-          gameStateDeviceId: position.deviceId,
-        })),
-      );
-      // History hydration never enqueues banners, even if the older ID cache was lost.
-      let seededHistory = false;
-      if (
-        gameHistoryRef.current.key ===
-        gameNotificationHistoryKey(window.location.origin, currentUser)
-      ) {
-        for (const alert of gameHistoryRef.current.items) {
-          if (!handledGameAlertsRef.current.values.has(alert.id)) {
-            handledGameAlertsRef.current.values.set(alert.id, Date.now());
-            seededHistory = true;
-          }
-        }
-      }
-      const unseen = takeUnseenGameAlerts(alerts, handledGameAlertsRef.current.values);
-      if (unseen.length || seededHistory)
-        saveHandledGameAlerts(storage, key, handledGameAlertsRef.current.values);
-      if (unseen.length) {
-        dispatch(
-          gameNotificationsActions.add({
-            key: gameNotificationHistoryKey(window.location.origin, currentUser),
-            items: unseen,
-            user: currentUser,
-            now: Date.now(),
-          }),
-        );
-        setGameAlertQueue((current) => replaceGameAlertQueue(current, key, unseen));
-      }
-    },
-    [dispatch],
-  );
-
   const connectSocketRef = useRef();
 
   const connectSocket = useCallback(() => {
@@ -229,6 +151,7 @@ const SocketController = () => {
     socket.onopen = () => {
       if (!isCurrent()) return;
       dispatch(sessionActions.updateSocket(true));
+      requestGameNotificationSync();
       socket.send(JSON.stringify({ logs: includeLogsRef.current }));
       geofenceRefreshScheduler.schedule();
       drawingRefreshScheduler.schedule();
@@ -251,7 +174,6 @@ const SocketController = () => {
         if (positionsResponse.ok) {
           const positions = await positionsResponse.json();
           if (!isCurrent()) return;
-          handleGameAlertPositions(positions);
           dispatch(sessionActions.updatePositions(positions));
         }
         if (devicesResponse.status === 401 || positionsResponse.status === 401) {
@@ -284,7 +206,6 @@ const SocketController = () => {
         dispatch(devicesActions.update(data.devices));
       }
       if (Array.isArray(data.positions)) {
-        handleGameAlertPositions(data.positions);
         dispatch(sessionActions.updatePositions(data.positions));
       }
       if (Array.isArray(data.events)) {
@@ -299,6 +220,9 @@ const SocketController = () => {
       if (Array.isArray(data.invalidate) && data.invalidate.includes('drawings')) {
         drawingRefreshScheduler.schedule();
       }
+      if (Array.isArray(data.invalidate) && data.invalidate.includes('game-notifications')) {
+        requestGameNotificationSync();
+      }
       if (Array.isArray(data.invalidate) && data.invalidate.includes('user')) {
         userRefreshScheduler.schedule();
       }
@@ -308,7 +232,6 @@ const SocketController = () => {
     dispatch,
     drawingRefreshScheduler,
     geofenceRefreshScheduler,
-    handleGameAlertPositions,
     navigate,
     userRefreshScheduler,
   ]);
@@ -411,77 +334,6 @@ const SocketController = () => {
     };
   }, [authenticated, connectSocket]);
 
-  useEffect(() => {
-    setGameAlertQueue({ key: null, alerts: [] });
-    playedGameAlertRef.current = null;
-    handledGameAlertsRef.current = { key: null, values: new Map() };
-  }, [user?.id]);
-
-  useEffect(() => {
-    const onVisibility = () => {
-      setVisible(document.visibilityState === 'visible');
-      setGameAlertQueue((current) => ({
-        ...current,
-        alerts: current.alerts.filter((alert) => isFreshGameAlert(alert)),
-      }));
-    };
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, []);
-
-  const gameAlertKey = user?.id ? handledGameAlertsKey(window.location.origin, user.id) : null;
-  const headGameAlert = gameAlertQueue.key === gameAlertKey ? gameAlertQueue.alerts[0] : null;
-  const activeGameAlert = canReceiveGameAlert(headGameAlert, user) ? headGameAlert : null;
-
-  useEffect(() => {
-    if (!gameHistory.key || !gameHistory.items.length) return undefined;
-    const expiresAt = Math.min(
-      ...gameHistory.items.map(
-        (alert) => Date.parse(alert.occurredAt) + gameNotificationHistoryAgeMs,
-      ),
-    );
-    const timer = setTimeout(
-      () =>
-        dispatch(
-          gameNotificationsActions.prune({
-            key: gameHistory.key,
-            user,
-            now: Date.now(),
-          }),
-        ),
-      Math.max(1, expiresAt - Date.now() + 1),
-    );
-    return () => clearTimeout(timer);
-  }, [dispatch, gameHistory.key, gameHistory.items, user]);
-
-  useEffect(() => {
-    setGameAlertQueue((current) => {
-      const permitted = current.alerts.filter((alert) => canReceiveGameAlert(alert, user));
-      return permitted.length === current.alerts.length
-        ? current
-        : { ...current, alerts: permitted };
-    });
-  }, [user]);
-
-  useEffect(() => {
-    if (activeGameAlert && !isFreshGameAlert(activeGameAlert)) {
-      setGameAlertQueue((current) => ({
-        ...current,
-        alerts: current.alerts.filter((alert) => isFreshGameAlert(alert)),
-      }));
-      return;
-    }
-    if (
-      visible &&
-      activeGameAlert &&
-      isFreshGameAlert(activeGameAlert) &&
-      playedGameAlertRef.current !== `${gameAlertKey}:${activeGameAlert.id}`
-    ) {
-      playedGameAlertRef.current = `${gameAlertKey}:${activeGameAlert.id}`;
-      playAlarm();
-    }
-  }, [activeGameAlert, gameAlertKey, visible]);
-
   return (
     <>
       {notifications.map((notification) => (
@@ -493,37 +345,7 @@ const SocketController = () => {
           onClose={() => setNotifications((prev) => prev.filter((e) => e.id !== notification.id))}
         />
       ))}
-      <Snackbar
-        key={activeGameAlert?.id}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-        sx={{
-          zIndex: (theme) =>
-            gameHistory.drawerVisible ? theme.zIndex.drawer - 1 : theme.zIndex.snackbar,
-        }}
-        open={visible && Boolean(activeGameAlert)}
-        message={activeGameAlert?.message}
-        autoHideDuration={gameAlertDurationMs}
-        resumeHideDuration={gameAlertDurationMs}
-        action={
-          <IconButton
-            size="small"
-            color="inherit"
-            aria-label={t('gameNotificationsDismissBanner')}
-            onClick={() =>
-              setGameAlertQueue((current) =>
-                closeGameAlertQueue(current, gameAlertKey, activeGameAlert?.id, 'dismiss'),
-              )
-            }
-          >
-            <CloseIcon fontSize="small" />
-          </IconButton>
-        }
-        onClose={(_event, reason) =>
-          setGameAlertQueue((current) =>
-            closeGameAlertQueue(current, gameAlertKey, activeGameAlert?.id, reason),
-          )
-        }
-      />
+      <GameNotificationsController playAlarm={playAlarm} />
     </>
   );
 };

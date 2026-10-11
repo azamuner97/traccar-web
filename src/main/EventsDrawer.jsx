@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -10,6 +10,8 @@ import {
   ListItemText,
   Toolbar,
   Typography,
+  Pagination,
+  Alert,
 } from '@mui/material';
 import { makeStyles } from 'tss-react/mui';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -19,6 +21,7 @@ import { useTranslation } from '../common/components/LocalizationProvider';
 import { eventsActions, gameNotificationsActions } from '../store';
 import { formatGameNotificationTime, mergeNotificationEntries } from './gameNotificationHistory';
 import useFeatures from '../common/util/useFeatures';
+import { requestGameNotificationSync } from './gameNotificationSync';
 
 const useStyles = makeStyles()((theme) => ({
   drawer: {
@@ -46,8 +49,16 @@ const EventsDrawer = ({ open, onClose }) => {
   const history = useSelector((state) => state.gameNotifications);
   const user = useSelector((state) => state.session.user);
   const entries = mergeNotificationEntries(features.disableEvents ? [] : events, history.items);
+  const [page, setPage] = useState(1);
+  const pages = Math.max(1, Math.ceil(entries.length / 100));
+  const currentPage = Math.min(page, pages);
 
   useEffect(() => {
+    setPage(1);
+  }, [open, history.key]);
+
+  useEffect(() => {
+    if (open) requestGameNotificationSync();
     const update = () => {
       dispatch(
         gameNotificationsActions.prune({
@@ -91,7 +102,7 @@ const EventsDrawer = ({ open, onClose }) => {
           aria-label={t('gameNotificationsClearHistory')}
           onClick={() => {
             dispatch(eventsActions.deleteAll());
-            dispatch(gameNotificationsActions.deleteAll({ key: history.key }));
+            dispatch(gameNotificationsActions.deleteAll({ key: history.key, now: Date.now() }));
           }}
         >
           <DeleteIcon fontSize="small" />
@@ -100,13 +111,15 @@ const EventsDrawer = ({ open, onClose }) => {
           <CloseIcon fontSize="small" />
         </IconButton>
       </Toolbar>
+      {history.loading && <Typography sx={{ px: 2 }}>{t('gameNotificationsLoading')}</Typography>}
+      {history.error && <Alert severity="warning">{history.error}</Alert>}
       <List className={classes.drawer} dense>
         {entries.length === 0 && (
           <ListItem>
             <ListItemText primary={t('gameNotificationsEmpty')} />
           </ListItem>
         )}
-        {entries.map(({ kind, item: event }) =>
+        {entries.slice((currentPage - 1) * 100, currentPage * 100).map(({ kind, item: event }) =>
           kind === 'game' ? (
             <ListItem
               key={`game:${event.id}`}
@@ -148,6 +161,15 @@ const EventsDrawer = ({ open, onClose }) => {
           ),
         )}
       </List>
+      {pages > 1 && (
+        <Pagination
+          count={pages}
+          page={currentPage}
+          onChange={(_event, value) => setPage(value)}
+          aria-label={t('gameNotificationsHistoryPages')}
+          sx={{ px: 2, pb: 2 }}
+        />
+      )}
     </Drawer>
   );
 };

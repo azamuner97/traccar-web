@@ -1,45 +1,42 @@
 import { sessionActions } from './session.js';
 import { gameNotificationsActions } from './gameNotifications.js';
-import { gameAlertStorage } from '../main/gameAlerts.js';
-import {
-  gameNotificationHistoryKey,
-  loadGameNotificationHistory,
-  saveGameNotificationHistory,
-} from '../main/gameNotificationHistory.js';
+import { gameNotificationCache } from '../main/gameNotificationCache.js';
+import { gameNotificationAccountKey } from '../main/gameNotificationHistory.js';
 
 export const createGameNotificationsMiddleware =
-  ({
-    getStorage = gameAlertStorage,
-    getOrigin = () => window.location.origin,
-    now = Date.now,
-  } = {}) =>
+  ({ cache = gameNotificationCache, getOrigin = () => window.location.origin } = {}) =>
   (store) =>
   (next) =>
   (action) => {
-    // Queued callbacks may capture an older role; use current authorization.
     if (
       action.type === gameNotificationsActions.add.type ||
       action.type === gameNotificationsActions.prune.type
     ) {
       action = { ...action, payload: { ...action.payload, user: store.getState().session.user } };
     }
+    const before = gameNotificationAccountKey(getOrigin(), store.getState().session.user);
     const result = next(action);
     const user = store.getState().session.user;
-    const key = gameNotificationHistoryKey(getOrigin(), user);
+    const account = gameNotificationAccountKey(getOrigin(), user);
     if (action.type === sessionActions.updateUser.type) {
-      if (store.getState().gameNotifications.key !== key) {
-        store.dispatch(
-          gameNotificationsActions.activate({
-            key,
-            items: key ? loadGameNotificationHistory(getStorage(), key, user, now()) : [],
-          }),
-        );
-      } else if (key) {
-        store.dispatch(gameNotificationsActions.prune({ key, user, now: now() }));
+      if (before !== account) store.dispatch(gameNotificationsActions.deactivate());
+      else if (account) {
+        const history = store.getState().gameNotifications;
+        store.dispatch(gameNotificationsActions.prune({ key: history.key, user, now: Date.now() }));
       }
-    } else if (key && action.type.startsWith('gameNotifications/')) {
+    } else if (action.type.startsWith('gameNotifications/')) {
       const history = store.getState().gameNotifications;
-      if (history.key === key) saveGameNotificationHistory(getStorage(), key, history.items);
+      if (account && history.key)
+        cache.save(history.key, {
+          generation: history.generation,
+          items: history.items,
+          handled: history.handled,
+          deleted: history.deleted,
+          clearBefore: history.clearBefore,
+          cursor: history.cursor,
+        });
+      if (account && history.key)
+        cache.save(`active:${account}`, { generation: history.generation });
     }
     return result;
   };

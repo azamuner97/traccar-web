@@ -1,157 +1,104 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { configureStore } from '@reduxjs/toolkit';
-import { gameNotificationsActions, gameNotificationsReducer } from './gameNotifications.js';
+import {
+  gameNotificationsActions as actions,
+  gameNotificationsReducer,
+  emptyGameNotificationState,
+} from './gameNotifications.js';
 import { sessionActions, sessionReducer } from './session.js';
 import { createGameNotificationsMiddleware } from './gameNotificationsMiddleware.js';
-import { gameNotificationHistoryKey } from '../main/gameNotificationHistory.js';
-
-const now = Date.parse('2026-10-11T12:00:00Z');
+const generation = '12345678-1234-1234-1234-123456789abc';
 const user = {
   id: 5,
-  attributes: { traccarToolUserRole: 'player', traccarToolSessionDeviceId: 900 },
+  attributes: { traccarToolUserRole: 'spectator', traccarToolSessionDeviceId: 900 },
 };
-const alert = (id = 'one', changes = {}) => ({
+const item = (id = 'one') => ({
   id,
-  type: 'speedhunt',
-  audience: 'participants',
-  message: '[14:00:00] Speedhunt: Ping 1 out of 4 sent.',
-  occurredAt: new Date(now).toISOString(),
-  timeZone: 'Europe/Zurich',
+  type: 'notificationTest',
+  audience: 'session',
+  message: 'Test',
+  occurredAt: '2026-01-01T00:00:00Z',
+  timeZone: 'UTC',
+  generation,
   gameStateDeviceId: 900,
-  ...changes,
 });
-
-const setup = (values = new Map(), storage = null) => {
+const setup = () => {
+  const saved = new Map();
   const store = configureStore({
     reducer: { session: sessionReducer, gameNotifications: gameNotificationsReducer },
     middleware: (defaults) =>
       defaults().concat(
         createGameNotificationsMiddleware({
           getOrigin: () => 'https://one.test',
-          now: () => now,
-          getStorage: () =>
-            storage || {
-              getItem: (key) => values.get(key),
-              setItem: (key, value) => values.set(key, value),
-            },
+          cache: { save: (key, value) => saved.set(key, structuredClone(value)) },
         }),
       ),
   });
   store.dispatch(sessionActions.updateUser(user));
-  const key = gameNotificationHistoryKey('https://one.test', user);
+  store.dispatch(actions.activate({ key: 'scope', generation }));
   const add = (items) =>
     store.dispatch(
-      gameNotificationsActions.add({ key, user: store.getState().session.user, items, now }),
+      actions.add({
+        key: 'scope',
+        items,
+        user,
+        cursor: String(items.length),
+        now: Date.parse('2026-10-11T12:00:00Z'),
+      }),
     );
-  return { store, key, add, values };
+  return { store, saved, add };
 };
-
-test('history marks entries read only when the visible drawer opens, including arrivals while open', () => {
-  const { store, key, add } = setup();
-  add([alert()]);
+test('visible drawer marks records read; hidden arrivals remain unread', () => {
+  const { store, add } = setup();
+  add([item()]);
   assert.equal(store.getState().gameNotifications.items[0].read, false);
-  store.dispatch(gameNotificationsActions.setDrawerVisible({ key, visible: true }));
-  assert.equal(store.getState().gameNotifications.items[0].read, true);
-  add([alert('two')]);
-  assert.equal(store.getState().gameNotifications.items[0].read, true);
-  store.dispatch(gameNotificationsActions.setDrawerVisible({ key, visible: false }));
-  add([alert('three')]);
+  store.dispatch(actions.setDrawerVisible({ key: 'scope', visible: true }));
+  add([item('two')]);
+  assert.ok(store.getState().gameNotifications.items.every((entry) => entry.read));
+  store.dispatch(actions.setDrawerVisible({ key: 'scope', visible: false }));
+  add([item('three')]);
   assert.equal(store.getState().gameNotifications.items[0].read, false);
-  add([alert('one')]);
-  assert.equal(
-    store.getState().gameNotifications.items.find((item) => item.id === 'one').read,
-    true,
-  );
 });
-
-test('hydration persists read status without a banner queue, preserving history across logout', () => {
-  const { store, key, add, values } = setup();
-  add([alert()]);
-  store.dispatch(gameNotificationsActions.setDrawerVisible({ key, visible: true }));
+test('deletion and clear-all suppress archive restoration but retain handled IDs', () => {
+  const { store, add } = setup();
+  add([item()]);
+  store.dispatch(actions.delete({ key: 'scope', id: 'one' }));
+  add([item()]);
+  assert.equal(store.getState().gameNotifications.items.length, 0);
+  assert.ok(store.getState().gameNotifications.handled.includes('one'));
+  add([item('two')]);
+  store.dispatch(actions.deleteAll({ key: 'scope', now: Date.now() }));
+  add([item('old')]);
+  assert.equal(store.getState().gameNotifications.items.length, 0);
+});
+test('full history persists and logout only clears active state', () => {
+  const { store, saved, add } = setup();
+  add(Array.from({ length: 250 }, (_, i) => item(String(i))));
+  assert.equal(saved.get('scope').items.length, 250);
   store.dispatch(sessionActions.updateUser(null));
-  assert.deepEqual(store.getState().gameNotifications, {
-    key: null,
-    items: [],
-    drawerVisible: false,
-  });
-  assert.equal(values.size, 1);
-  store.dispatch(sessionActions.updateUser(user));
-  assert.equal(store.getState().gameNotifications.items[0].read, true);
-  assert.equal(store.getState().gameNotifications.drawerVisible, false);
-  assert.equal(setup(values).store.getState().gameNotifications.items[0].read, true);
+  assert.deepEqual(store.getState().gameNotifications, emptyGameNotificationState());
+  assert.equal(saved.get('scope').items.length, 250);
 });
-
-test('account, session and role changes isolate history and reject late mutations', () => {
-  const { store, key, add } = setup();
-  add([alert(), alert('caught', { type: 'playerCaught', audience: 'session' })]);
+test('revoked roles and account changes reject late history writes', () => {
+  const { store, add } = setup();
+  add([item()]);
   store.dispatch(
     sessionActions.updateUser({
       ...user,
-      attributes: { ...user.attributes, traccarToolUserRole: 'hunter' },
+      attributes: { ...user.attributes, traccarToolUserRole: 'unknown' },
     }),
   );
-  assert.deepEqual(
-    store.getState().gameNotifications.items.map((item) => item.id),
-    ['caught'],
-  );
-  store.dispatch(gameNotificationsActions.add({ key, user, now, items: [alert('stale-role')] }));
-  assert.deepEqual(
-    store.getState().gameNotifications.items.map((item) => item.id),
-    ['caught'],
-  );
-  store.dispatch(sessionActions.updateUser({ ...user, id: 6 }));
-  assert.deepEqual(store.getState().gameNotifications.items, []);
-  add([alert('late')]);
-  store.dispatch(gameNotificationsActions.deleteAll({ key }));
-  assert.deepEqual(store.getState().gameNotifications.items, []);
-  store.dispatch(sessionActions.updateUser(user));
-  assert.equal(store.getState().gameNotifications.items.length, 1);
+  add([item('late')]);
+  assert.equal(store.getState().gameNotifications.items.length, 0);
+});
+test('a new generation starts with empty read, deletion and deduplication state', () => {
+  const { store, add } = setup();
+  add([item()]);
+  store.dispatch(actions.delete({ key: 'scope', id: 'one' }));
   store.dispatch(
-    sessionActions.updateUser({
-      ...user,
-      attributes: { ...user.attributes, traccarToolSessionDeviceId: 901 },
-    }),
+    actions.activate({ key: 'fresh', generation: '87654321-1234-1234-1234-123456789abc' }),
   );
-  assert.deepEqual(store.getState().gameNotifications.items, []);
-});
-
-test('pruning expires history, and equal-time batches retain the newest 100 IDs stably', () => {
-  const { store, key, add } = setup();
-  add(Array.from({ length: 105 }, (_, index) => alert(String(index))));
-  assert.equal(store.getState().gameNotifications.items.length, 100);
-  assert.equal(store.getState().gameNotifications.items[0].id, '104');
-  assert.equal(store.getState().gameNotifications.items.at(-1).id, '5');
-  store.dispatch(gameNotificationsActions.prune({ key, user, now }));
-  assert.equal(store.getState().gameNotifications.items[0].id, '104');
-  store.dispatch(gameNotificationsActions.prune({ key, user, now: now + 24 * 60 * 60 * 1000 + 1 }));
-  assert.deepEqual(store.getState().gameNotifications.items, []);
-});
-
-test('individual deletion and clear-all update local history, not the delivery ID cache', () => {
-  const { store, key, add, values } = setup();
-  const handledKey = 'traccarToolHandledAlerts:https://one.test:5';
-  values.set(handledKey, '[{"id":"one","handledAt":1}]');
-  add([alert(), alert('two')]);
-  store.dispatch(gameNotificationsActions.delete({ key, id: 'one' }));
-  assert.deepEqual(
-    store.getState().gameNotifications.items.map((item) => item.id),
-    ['two'],
-  );
-  store.dispatch(gameNotificationsActions.deleteAll({ key }));
-  assert.deepEqual(store.getState().gameNotifications.items, []);
-  assert.equal(values.get(handledKey), '[{"id":"one","handledAt":1}]');
-});
-
-test('blocked storage retains usable in-memory history', () => {
-  const { store, add } = setup(undefined, {
-    getItem() {
-      throw Error('blocked');
-    },
-    setItem() {
-      throw Error('blocked');
-    },
-  });
-  assert.doesNotThrow(() => add([alert()]));
-  assert.equal(store.getState().gameNotifications.items.length, 1);
+  assert.deepEqual(store.getState().gameNotifications.deleted, []);
+  assert.deepEqual(store.getState().gameNotifications.handled, []);
 });
