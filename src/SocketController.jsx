@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
-import { Snackbar } from '@mui/material';
+import { IconButton, Snackbar } from '@mui/material';
+import CloseIcon from '@mui/icons-material/Close';
 import {
   devicesActions,
   drawingsActions,
   errorsActions,
   geofencesActions,
   sessionActions,
+  gameNotificationsActions,
 } from './store';
-import { useCatchCallback, useAsyncTask } from './reactHelper';
+import { useCatchCallback } from './reactHelper';
 import { snackBarDurationLongMs } from './common/util/duration';
 import alarm from './resources/alarm.mp3';
 import { eventsActions } from './store/events';
@@ -21,9 +23,19 @@ import {
 } from './common/components/NativeInterface';
 import fetchOrThrow from './common/util/fetchOrThrow';
 import createRefreshScheduler from './common/util/refreshScheduler';
+import { useTranslation } from './common/components/LocalizationProvider';
+import {
+  gameNotificationHistoryAgeMs,
+  gameNotificationHistoryKey,
+} from './main/gameNotificationHistory';
 import {
   gameAlertDurationMs,
+  replaceGameAlertQueue,
+  closeGameAlertQueue,
+  canReceiveGameAlert,
+  gameAlertStorage,
   handledGameAlertsKey,
+  isFreshGameAlert,
   loadHandledGameAlerts,
   parseGameAlerts,
   saveHandledGameAlerts,
@@ -34,20 +46,32 @@ const logoutCode = 4000;
 
 let alarmAudio;
 const playAlarm = () => {
-  if (!alarmAudio) {
-    alarmAudio = new Audio(alarm);
+  try {
+    if (!alarmAudio) {
+      alarmAudio = new Audio(alarm);
+    }
+    alarmAudio.currentTime = 0;
+    alarmAudio.play().catch(() => {});
+  } catch {
+    // Sound is best-effort when browser/WebView autoplay is restricted.
   }
-  alarmAudio.currentTime = 0;
-  alarmAudio.play().catch(() => {});
 };
 
 const SocketController = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const t = useTranslation();
 
   const user = useSelector((state) => state.session.user);
   const authenticated = Boolean(user);
   const includeLogs = useSelector((state) => state.session.includeLogs);
+  const gameHistory = useSelector((state) => state.gameNotifications);
+  const gameHistoryRef = useRef(gameHistory);
+  gameHistoryRef.current = gameHistory;
+  const userRef = useRef(user);
+  userRef.current = user;
+  const includeLogsRef = useRef(includeLogs);
+  includeLogsRef.current = includeLogs;
 
   const socketRef = useRef();
   const reconnectTimeoutRef = useRef();
@@ -99,7 +123,9 @@ const SocketController = () => {
   }, []);
 
   const [notifications, setNotifications] = useState([]);
-  const [gameAlertQueue, setGameAlertQueue] = useState([]);
+  const [gameAlertQueue, setGameAlertQueue] = useState({ key: null, alerts: [] });
+  const [visible, setVisible] = useState(document.visibilityState === 'visible');
+  const playedGameAlertRef = useRef(null);
   const handledGameAlertsRef = useRef({ key: null, values: new Map() });
 
   const soundEvents = useAttributePreference('soundEvents', '');
@@ -137,29 +163,60 @@ const SocketController = () => {
 
   const handleGameAlertPositions = useCallback(
     (positions) => {
-      if (!user?.id) {
+      const currentUser = userRef.current;
+      if (!currentUser?.id || !Array.isArray(positions)) {
         return;
       }
-      const key = handledGameAlertsKey(window.location.origin, user.id);
+      const key = handledGameAlertsKey(window.location.origin, currentUser.id);
+      const storage = gameAlertStorage();
       if (handledGameAlertsRef.current.key !== key) {
         handledGameAlertsRef.current = {
           key,
-          values: loadHandledGameAlerts(window.localStorage, key),
+          values: loadHandledGameAlerts(storage, key),
         };
       }
-      const alerts = positions.flatMap((position) => parseGameAlerts(position, user));
+      const alerts = positions.flatMap((position) =>
+        parseGameAlerts(position, currentUser).map((alert) => ({
+          ...alert,
+          gameStateDeviceId: position.deviceId,
+        })),
+      );
+      // History hydration never enqueues banners, even if the older ID cache was lost.
+      let seededHistory = false;
+      if (
+        gameHistoryRef.current.key ===
+        gameNotificationHistoryKey(window.location.origin, currentUser)
+      ) {
+        for (const alert of gameHistoryRef.current.items) {
+          if (!handledGameAlertsRef.current.values.has(alert.id)) {
+            handledGameAlertsRef.current.values.set(alert.id, Date.now());
+            seededHistory = true;
+          }
+        }
+      }
       const unseen = takeUnseenGameAlerts(alerts, handledGameAlertsRef.current.values);
+      if (unseen.length || seededHistory)
+        saveHandledGameAlerts(storage, key, handledGameAlertsRef.current.values);
       if (unseen.length) {
-        saveHandledGameAlerts(window.localStorage, key, handledGameAlertsRef.current.values);
-        setGameAlertQueue((current) => [...current, ...unseen]);
+        dispatch(
+          gameNotificationsActions.add({
+            key: gameNotificationHistoryKey(window.location.origin, currentUser),
+            items: unseen,
+            user: currentUser,
+            now: Date.now(),
+          }),
+        );
+        setGameAlertQueue((current) => replaceGameAlertQueue(current, key, unseen));
       }
     },
-    [user],
+    [dispatch],
   );
 
   const connectSocketRef = useRef();
 
   const connectSocket = useCallback(() => {
+    const accountId = userRef.current?.id;
+    if (!accountId) return;
     clearReconnectTimeout();
     if (socketRef.current && socketRef.current.readyState !== WebSocket.CLOSED) {
       socketRef.current.close();
@@ -167,26 +224,33 @@ const SocketController = () => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const socket = new WebSocket(`${protocol}//${window.location.host}/api/socket`);
     socketRef.current = socket;
+    const isCurrent = () => socketRef.current === socket && userRef.current?.id === accountId;
 
     socket.onopen = () => {
+      if (!isCurrent()) return;
       dispatch(sessionActions.updateSocket(true));
+      socket.send(JSON.stringify({ logs: includeLogsRef.current }));
       geofenceRefreshScheduler.schedule();
       drawingRefreshScheduler.schedule();
     };
 
     socket.onclose = async (event) => {
+      if (!isCurrent()) return;
       dispatch(sessionActions.updateSocket(false));
       if (event.code === logoutCode) return;
       try {
         const devicesResponse = await fetch('/api/devices');
-        if (socketRef.current !== socket) return;
+        if (!isCurrent()) return;
         if (devicesResponse.ok) {
-          dispatch(devicesActions.update(await devicesResponse.json()));
+          const devices = await devicesResponse.json();
+          if (!isCurrent()) return;
+          dispatch(devicesActions.update(devices));
         }
         const positionsResponse = await fetch('/api/positions');
-        if (socketRef.current !== socket) return;
+        if (!isCurrent()) return;
         if (positionsResponse.ok) {
           const positions = await positionsResponse.json();
+          if (!isCurrent()) return;
           handleGameAlertPositions(positions);
           dispatch(sessionActions.updatePositions(positions));
         }
@@ -199,7 +263,7 @@ const SocketController = () => {
       } catch {
         // ignore errors
       }
-      if (socketRef.current !== socket) return;
+      if (!isCurrent()) return;
       clearReconnectTimeout();
       reconnectTimeoutRef.current = setTimeout(() => {
         reconnectTimeoutRef.current = null;
@@ -208,27 +272,34 @@ const SocketController = () => {
     };
 
     socket.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.devices) {
+      if (!isCurrent()) return;
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      if (!data || typeof data !== 'object') return;
+      if (Array.isArray(data.devices)) {
         dispatch(devicesActions.update(data.devices));
       }
-      if (data.positions) {
+      if (Array.isArray(data.positions)) {
         handleGameAlertPositions(data.positions);
         dispatch(sessionActions.updatePositions(data.positions));
       }
-      if (data.events) {
+      if (Array.isArray(data.events)) {
         handleEventsRef.current(data.events);
       }
       if (data.logs) {
         dispatch(sessionActions.updateLogs(data.logs));
       }
-      if (data.invalidate?.includes('geofences')) {
+      if (Array.isArray(data.invalidate) && data.invalidate.includes('geofences')) {
         geofenceRefreshScheduler.schedule();
       }
-      if (data.invalidate?.includes('drawings')) {
+      if (Array.isArray(data.invalidate) && data.invalidate.includes('drawings')) {
         drawingRefreshScheduler.schedule();
       }
-      if (data.invalidate?.includes('user')) {
+      if (Array.isArray(data.invalidate) && data.invalidate.includes('user')) {
         userRefreshScheduler.schedule();
       }
     };
@@ -245,48 +316,61 @@ const SocketController = () => {
   connectSocketRef.current = connectSocket;
 
   useEffect(() => {
-    socketRef.current?.send(JSON.stringify({ logs: includeLogs }));
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ logs: includeLogs }));
+    }
   }, [includeLogs]);
 
-  useAsyncTask(
-    async ({ signal }) => {
-      if (authenticated) {
-        const response = await fetchOrThrow('/api/devices', { signal });
-        dispatch(devicesActions.refresh(await response.json()));
+  useEffect(() => {
+    if (!user?.id) return undefined;
+    const controller = new AbortController();
+    const initialize = async () => {
+      try {
+        const response = await fetchOrThrow('/api/devices', { signal: controller.signal });
+        const devices = await response.json();
+        if (controller.signal.aborted) return;
+        dispatch(devicesActions.refresh(devices));
         nativePostMessage('authenticated');
         connectSocket();
-        return () => {
-          clearReconnectTimeout();
-          geofenceRefreshScheduler.cancel();
-          drawingRefreshScheduler.cancel();
-          userRefreshScheduler.cancel();
-          dispatch(drawingsActions.refresh([]));
-          socketRef.current?.close(logoutCode);
-        };
+      } catch (error) {
+        if (!controller.signal.aborted) dispatch(errorsActions.push(error.message));
       }
-      return null;
-    },
-    [
-      authenticated,
-      dispatch,
-      clearReconnectTimeout,
-      connectSocket,
-      drawingRefreshScheduler,
-      geofenceRefreshScheduler,
-      userRefreshScheduler,
-    ],
-  );
+    };
+    initialize();
+    return () => {
+      controller.abort();
+      clearReconnectTimeout();
+      geofenceRefreshScheduler.cancel();
+      drawingRefreshScheduler.cancel();
+      userRefreshScheduler.cancel();
+      dispatch(drawingsActions.refresh([]));
+      const socket = socketRef.current;
+      socketRef.current = null;
+      socket?.close(logoutCode);
+      dispatch(sessionActions.updateSocket(false));
+    };
+  }, [
+    user?.id,
+    dispatch,
+    clearReconnectTimeout,
+    connectSocket,
+    drawingRefreshScheduler,
+    geofenceRefreshScheduler,
+    userRefreshScheduler,
+  ]);
 
   const handleNativeNotification = useCatchCallback(
     async (message) => {
-      const eventId = message.data.eventId;
-      if (eventId) {
+      const accountId = userRef.current?.id;
+      const eventId = message?.data?.eventId;
+      if (accountId && eventId) {
         const response = await fetch(`/api/events/${eventId}`);
         if (response.ok) {
           const event = await response.json();
+          if (userRef.current?.id !== accountId) return;
           const eventWithMessage = {
             ...event,
-            attributes: { ...event.attributes, message: message.notification.body },
+            attributes: { ...event.attributes, message: message.notification?.body },
           };
           handleEvents([eventWithMessage]);
         }
@@ -328,17 +412,75 @@ const SocketController = () => {
   }, [authenticated, connectSocket]);
 
   useEffect(() => {
-    setGameAlertQueue([]);
+    setGameAlertQueue({ key: null, alerts: [] });
+    playedGameAlertRef.current = null;
     handledGameAlertsRef.current = { key: null, values: new Map() };
   }, [user?.id]);
 
-  const activeGameAlert = gameAlertQueue[0];
+  useEffect(() => {
+    const onVisibility = () => {
+      setVisible(document.visibilityState === 'visible');
+      setGameAlertQueue((current) => ({
+        ...current,
+        alerts: current.alerts.filter((alert) => isFreshGameAlert(alert)),
+      }));
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
+  const gameAlertKey = user?.id ? handledGameAlertsKey(window.location.origin, user.id) : null;
+  const headGameAlert = gameAlertQueue.key === gameAlertKey ? gameAlertQueue.alerts[0] : null;
+  const activeGameAlert = canReceiveGameAlert(headGameAlert, user) ? headGameAlert : null;
 
   useEffect(() => {
-    if (activeGameAlert && document.visibilityState === 'visible') {
+    if (!gameHistory.key || !gameHistory.items.length) return undefined;
+    const expiresAt = Math.min(
+      ...gameHistory.items.map(
+        (alert) => Date.parse(alert.occurredAt) + gameNotificationHistoryAgeMs,
+      ),
+    );
+    const timer = setTimeout(
+      () =>
+        dispatch(
+          gameNotificationsActions.prune({
+            key: gameHistory.key,
+            user,
+            now: Date.now(),
+          }),
+        ),
+      Math.max(1, expiresAt - Date.now() + 1),
+    );
+    return () => clearTimeout(timer);
+  }, [dispatch, gameHistory.key, gameHistory.items, user]);
+
+  useEffect(() => {
+    setGameAlertQueue((current) => {
+      const permitted = current.alerts.filter((alert) => canReceiveGameAlert(alert, user));
+      return permitted.length === current.alerts.length
+        ? current
+        : { ...current, alerts: permitted };
+    });
+  }, [user]);
+
+  useEffect(() => {
+    if (activeGameAlert && !isFreshGameAlert(activeGameAlert)) {
+      setGameAlertQueue((current) => ({
+        ...current,
+        alerts: current.alerts.filter((alert) => isFreshGameAlert(alert)),
+      }));
+      return;
+    }
+    if (
+      visible &&
+      activeGameAlert &&
+      isFreshGameAlert(activeGameAlert) &&
+      playedGameAlertRef.current !== `${gameAlertKey}:${activeGameAlert.id}`
+    ) {
+      playedGameAlertRef.current = `${gameAlertKey}:${activeGameAlert.id}`;
       playAlarm();
     }
-  }, [activeGameAlert]);
+  }, [activeGameAlert, gameAlertKey, visible]);
 
   return (
     <>
@@ -354,10 +496,33 @@ const SocketController = () => {
       <Snackbar
         key={activeGameAlert?.id}
         anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-        open={Boolean(activeGameAlert)}
+        sx={{
+          zIndex: (theme) =>
+            gameHistory.drawerVisible ? theme.zIndex.drawer - 1 : theme.zIndex.snackbar,
+        }}
+        open={visible && Boolean(activeGameAlert)}
         message={activeGameAlert?.message}
         autoHideDuration={gameAlertDurationMs}
-        onClose={() => setGameAlertQueue((current) => current.slice(1))}
+        resumeHideDuration={gameAlertDurationMs}
+        action={
+          <IconButton
+            size="small"
+            color="inherit"
+            aria-label={t('gameNotificationsDismissBanner')}
+            onClick={() =>
+              setGameAlertQueue((current) =>
+                closeGameAlertQueue(current, gameAlertKey, activeGameAlert?.id, 'dismiss'),
+              )
+            }
+          >
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        }
+        onClose={(_event, reason) =>
+          setGameAlertQueue((current) =>
+            closeGameAlertQueue(current, gameAlertKey, activeGameAlert?.id, reason),
+          )
+        }
       />
     </>
   );

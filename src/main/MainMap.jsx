@@ -20,6 +20,7 @@ import MapRuler from '../map/control/MapRuler';
 import MapNotification from '../map/control/MapNotification';
 import useFeatures from '../common/util/useFeatures';
 import MapDrawing from '../map/draw/MapDrawing';
+import { gameAlertSessionDeviceId } from './gameAlerts';
 
 const MainMap = ({ filteredPositions, selectedPosition, onEventsClick }) => {
   const theme = useTheme();
@@ -28,6 +29,10 @@ const MainMap = ({ filteredPositions, selectedPosition, onEventsClick }) => {
   const desktop = useMediaQuery(theme.breakpoints.up('md'));
 
   const eventsAvailable = useSelector((state) => !!state.events.items.length);
+  const gameUser = useSelector((state) => Boolean(gameAlertSessionDeviceId(state.session.user)));
+  const unreadCount = useSelector(
+    (state) => state.gameNotifications.items.filter((item) => !item.read).length,
+  );
 
   const features = useFeatures();
 
@@ -66,8 +71,12 @@ const MainMap = ({ filteredPositions, selectedPosition, onEventsClick }) => {
           active={activeMapTool === 'drawing'}
           onActiveChange={(value) => setActiveMapTool(value ? 'drawing' : null)}
         />
-        {!features.disableEvents && (
-          <MapNotification enabled={eventsAvailable} onClick={onEventsClick} />
+        {(!features.disableEvents || gameUser) && (
+          <MapNotification
+            enabled={(!features.disableEvents && eventsAvailable) || unreadCount > 0}
+            unreadCount={unreadCount}
+            onClick={onEventsClick}
+          />
         )}
       </MapView>
       <MapScale />

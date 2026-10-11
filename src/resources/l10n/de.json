@@ -1,5 +1,11 @@
 {
     "sharedLoading": "Lade...",
+    "gameNotificationsDismissBanner": "Benachrichtigung schließen",
+    "gameNotificationsCloseHistory": "Benachrichtigungsverlauf schließen",
+    "gameNotificationsUnread": "Ungelesene Spielbenachrichtigungen",
+    "gameNotificationsClearHistory": "Ereignis- und Benachrichtigungsverlauf löschen",
+    "gameNotificationsDeleteEntry": "Verlaufseintrag löschen",
+    "gameNotificationsEmpty": "Keine Ereignisse oder Spielbenachrichtigungen",
     "sharedHide": "Ausblenden",
     "sharedSave": "Speichern",
     "sharedSaved": "Gespeichert",

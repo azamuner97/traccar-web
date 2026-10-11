@@ -3,6 +3,10 @@ import test from 'node:test';
 
 import {
   handledGameAlertsKey,
+  replaceGameAlertQueue,
+  closeGameAlertQueue,
+  gameAlertStorage,
+  isFreshGameAlert,
   loadHandledGameAlerts,
   parseGameAlerts,
   saveHandledGameAlerts,
@@ -70,6 +74,10 @@ test('malformed, unknown, and stale alerts are ignored', () => {
   );
   assert.deepEqual(parseGameAlerts(position([alert({ type: 'unknown' })]), currentUser, now), []);
   assert.deepEqual(
+    parseGameAlerts(position([alert({ type: ['speedhunt'] })]), currentUser, now),
+    [],
+  );
+  assert.deepEqual(
     parseGameAlerts(position([alert()], { traccarToolAlertsVersion: 2 }), currentUser, now),
     [],
   );
@@ -134,4 +142,143 @@ test('persisted deduplication prunes entries after 24 hours and caps at 100 IDs'
   assert.equal(handled.has('alert-0'), true);
   assert.equal(handled.has('alert-104'), false);
   assert.equal(handled.has('expired'), false);
+});
+
+test('invalid session/device IDs cannot authorize an alert', () => {
+  for (const value of [undefined, null, '', ' ', false, true, [], {}, 0, -1, 900.1, '900e0']) {
+    const currentUser = user('player');
+    currentUser.attributes.traccarToolSessionDeviceId = value;
+    assert.deepEqual(
+      parseGameAlerts({ ...position([alert()]), deviceId: value }, currentUser, now),
+      [],
+    );
+  }
+  assert.equal(
+    parseGameAlerts(position([alert()]), user('player', undefined, '900'), now).length,
+    1,
+  );
+  assert.deepEqual(
+    parseGameAlerts(position([alert()]), { ...user('player'), administrator: true }, now),
+    [],
+  );
+});
+
+test('alert type determines audience and timestamps must be recent, UTC and plausible', () => {
+  assert.deepEqual(
+    parseGameAlerts(position([alert({ audience: 'session' })]), user('hunter'), now),
+    [],
+  );
+  assert.deepEqual(
+    parseGameAlerts(position([alert({ type: 'playerCaught' })]), user('player'), now),
+    [],
+  );
+  for (const occurredAt of [
+    null,
+    123,
+    'not-a-date',
+    '2026-10-10',
+    '2026-02-30T12:00:00Z',
+    '2026-10-11T12:00:00Z',
+  ]) {
+    assert.equal(isFreshGameAlert(alert({ occurredAt }), now), false);
+  }
+  assert.equal(isFreshGameAlert(alert({ occurredAt: '2026-10-10T12:00:30Z' }), now), true);
+  assert.equal(isFreshGameAlert(alert(), now + 15 * 60 * 1000), false);
+});
+
+test('cache cap keeps newest arrivals even when timestamps are identical', () => {
+  const handled = new Map();
+  takeUnseenGameAlerts(
+    Array.from({ length: 110 }, (_, index) => alert({ id: `a-${index}` })),
+    handled,
+    now,
+  );
+  assert.equal(handled.size, 100);
+  assert.equal(handled.has('a-0'), false);
+  assert.equal(handled.has('a-109'), true);
+  assert.deepEqual(takeUnseenGameAlerts([alert({ id: 'a-109' })], handled, now), []);
+});
+
+test('corrupt/unavailable persistence keeps in-memory deduplication usable', () => {
+  assert.deepEqual([...loadHandledGameAlerts({ getItem: () => '[null,{}]' }, 'key', now)], []);
+  assert.deepEqual([...loadHandledGameAlerts(null, 'key', now)], []);
+  const handled = new Map();
+  takeUnseenGameAlerts([alert()], handled, now);
+  assert.doesNotThrow(() => saveHandledGameAlerts(null, 'key', handled));
+  assert.deepEqual(takeUnseenGameAlerts([alert()], handled, now), []);
+  const oldWindow = globalThis.window;
+  globalThis.window = {
+    get localStorage() {
+      throw new Error('SecurityError');
+    },
+  };
+  assert.equal(gameAlertStorage(), null);
+  globalThis.window = oldWindow;
+});
+
+test('banner ignores click-away and stale close events and is isolated on account switch', () => {
+  const first = alert();
+  const second = alert({
+    id: 'second',
+    type: 'playerCaught',
+    audience: 'session',
+    message: 'Alice was caught',
+  });
+  let queue = replaceGameAlertQueue({ key: null, alerts: [] }, 'user-1', [first]);
+  assert.equal(closeGameAlertQueue(queue, 'user-1', first.id, 'clickaway'), queue);
+  queue = replaceGameAlertQueue(queue, 'user-1', [second]);
+  assert.deepEqual(queue.alerts, [second]);
+  assert.equal(closeGameAlertQueue(queue, 'user-1', first.id, 'timeout'), queue);
+  assert.equal(closeGameAlertQueue(queue, 'user-1', first.id, 'dismiss'), queue);
+  queue = replaceGameAlertQueue(queue, 'user-2', [first]);
+  assert.deepEqual(queue.alerts, [first]);
+  assert.equal(closeGameAlertQueue(queue, 'user-1', first.id, 'timeout'), queue);
+});
+
+test('new arrivals immediately discard active and pending old banners without mutating them', () => {
+  const first = alert();
+  const pending = alert({ id: 'pending' });
+  const incoming = alert({ id: 'incoming' });
+  const previous = { key: 'user-1', alerts: [first, pending] };
+  const queue = replaceGameAlertQueue(previous, 'user-1', [incoming]);
+  assert.deepEqual(queue.alerts, [incoming]);
+  assert.deepEqual(previous.alerts, [first, pending]);
+  assert.deepEqual(closeGameAlertQueue(queue, 'user-1', incoming.id, 'dismiss').alerts, []);
+});
+
+test('reconnect batches show the newest occurrence and favor the last arrival on timestamp ties', () => {
+  const older = alert({ id: 'older' });
+  const newest = alert({ id: 'newest', occurredAt: '2026-10-10T12:00:00Z' });
+  const sameTime = alert({ id: 'same-time', occurredAt: newest.occurredAt });
+  const empty = { key: null, alerts: [] };
+  assert.deepEqual(replaceGameAlertQueue(empty, 'user-1', [newest, older]).alerts, [newest]);
+  assert.deepEqual(replaceGameAlertQueue(empty, 'user-1', [newest, sameTime, older]).alerts, [
+    sameTime,
+  ]);
+});
+
+test('duplicate batches do not replace a banner and superseded alerts cannot replay', () => {
+  const handled = new Map();
+  const first = alert();
+  const second = alert({ id: 'second' });
+  let queue = replaceGameAlertQueue(
+    { key: null, alerts: [] },
+    'user-1',
+    takeUnseenGameAlerts([first], handled, now),
+  );
+  const initial = queue;
+  queue = replaceGameAlertQueue(queue, 'user-1', takeUnseenGameAlerts([first], handled, now));
+  assert.equal(queue, initial);
+  queue = replaceGameAlertQueue(
+    queue,
+    'user-1',
+    takeUnseenGameAlerts([first, second], handled, now),
+  );
+  assert.deepEqual(queue.alerts, [second]);
+  queue = closeGameAlertQueue(queue, 'user-1', second.id, 'timeout');
+  assert.equal(
+    replaceGameAlertQueue(queue, 'user-1', takeUnseenGameAlerts([first, second], handled, now)),
+    queue,
+  );
+  assert.deepEqual(queue.alerts, []);
 });

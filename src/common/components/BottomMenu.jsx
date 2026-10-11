@@ -17,10 +17,12 @@ import MapIcon from '@mui/icons-material/Map';
 import PersonIcon from '@mui/icons-material/Person';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
 
-import { sessionActions } from '../../store';
+import { errorsActions, sessionActions } from '../../store';
 import { useTranslation } from './LocalizationProvider';
 import { useRestriction } from '../util/permissions';
 import { nativePostMessage } from './NativeInterface';
+import fetchOrThrow from '../util/fetchOrThrow';
+import { removeNotificationToken } from '../util/notificationTokens';
 
 const BottomMenu = () => {
   const navigate = useNavigate();
@@ -61,27 +63,37 @@ const BottomMenu = () => {
   const handleLogout = async () => {
     setAnchorEl(null);
 
-    const notificationToken = window.localStorage.getItem('notificationToken');
-    if (notificationToken && !user.readonly) {
-      window.localStorage.removeItem('notificationToken');
-      const tokens = user.attributes.notificationTokens?.split(',') || [];
-      if (tokens.includes(notificationToken)) {
-        const updatedUser = {
-          ...user,
-          attributes: {
-            ...user.attributes,
-            notificationTokens:
-              tokens.length > 1
-                ? tokens.filter((it) => it !== notificationToken).join(',')
-                : undefined,
-          },
-        };
-        await fetch(`/api/users/${user.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updatedUser),
-        });
+    try {
+      const notificationToken = window.localStorage.getItem('notificationToken');
+      if (notificationToken) {
+        const response = await fetchOrThrow('/api/session');
+        const currentUser = await response.json();
+        const tokens = removeNotificationToken(
+          currentUser.attributes?.notificationTokens,
+          notificationToken,
+        );
+        if (currentUser.id === user.id && tokens !== currentUser.attributes?.notificationTokens) {
+          const updatedUser = {
+            ...currentUser,
+            attributes: {
+              ...currentUser.attributes,
+              notificationTokens: tokens || undefined,
+            },
+          };
+          await fetchOrThrow(`/api/users/${user.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(updatedUser),
+          });
+        }
+        window.localStorage.removeItem('notificationToken');
       }
+    } catch {
+      dispatch(
+        errorsActions.push(
+          'Could not remove this phone’s push token. Notification settings may need to be updated.',
+        ),
+      );
     }
 
     await fetch('/api/session', { method: 'DELETE' });

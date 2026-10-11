@@ -4,6 +4,8 @@ import { errorsReducer as errors } from './errors';
 import { sessionReducer as session } from './session';
 import { devicesReducer as devices } from './devices';
 import { eventsReducer as events } from './events';
+import { gameNotificationsReducer as gameNotifications } from './gameNotifications';
+import { createGameNotificationsMiddleware } from './gameNotificationsMiddleware';
 import { motionReducer as motion } from './motion';
 import { geofencesReducer as geofences } from './geofences';
 import { groupsReducer as groups } from './groups';
@@ -18,6 +20,7 @@ const reducer = combineReducers({
   session,
   devices,
   events,
+  gameNotifications,
   motion,
   geofences,
   groups,
@@ -31,6 +34,7 @@ export { errorsActions } from './errors';
 export { sessionActions } from './session';
 export { devicesActions } from './devices';
 export { eventsActions } from './events';
+export { gameNotificationsActions } from './gameNotifications';
 export { motionActions } from './motion';
 export { geofencesActions } from './geofences';
 export { groupsActions } from './groups';
@@ -41,5 +45,6 @@ export { drawingsActions } from './drawings';
 
 export default configureStore({
   reducer,
-  middleware: (getDefaultMiddleware) => getDefaultMiddleware().concat(throttleMiddleware),
+  middleware: (getDefaultMiddleware) =>
+    getDefaultMiddleware().concat(createGameNotificationsMiddleware(), throttleMiddleware),
 });

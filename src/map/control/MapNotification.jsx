@@ -4,6 +4,7 @@ import { makeStyles } from 'tss-react/mui';
 import { createRoot } from 'react-dom/client';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import { map } from '../core/MapView';
+import { useTranslation } from '../../common/components/LocalizationProvider';
 
 const useStyles = makeStyles()((theme) => ({
   button: {
@@ -19,9 +20,10 @@ const useStyles = makeStyles()((theme) => ({
   },
 }));
 
-const MapNotification = ({ enabled, onClick }) => {
+const MapNotification = ({ enabled, onClick, unreadCount = 0 }) => {
   const theme = useTheme();
   const { classes } = useStyles();
+  const t = useTranslation();
 
   const onClickRef = useRef(onClick);
   onClickRef.current = onClick;
@@ -56,7 +58,13 @@ const MapNotification = ({ enabled, onClick }) => {
 
   useEffect(() => {
     buttonRef.current?.classList.toggle('active', enabled);
-  }, [enabled]);
+    const label =
+      unreadCount > 0
+        ? `${t('reportEvents')}, ${t('gameNotificationsUnread')}: ${unreadCount}`
+        : t('reportEvents');
+    buttonRef.current?.setAttribute('aria-label', label);
+    buttonRef.current?.setAttribute('title', label);
+  }, [enabled, unreadCount, t, classes.button, theme.direction]);
 
   return null;
 };

@@ -4,6 +4,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { useAsyncTask } from '../../reactHelper';
 import { sessionActions } from '../../store';
 import fetchOrThrow from '../util/fetchOrThrow';
+import { addNotificationToken } from '../util/notificationTokens';
 
 export const nativeEnvironment =
   window.appInterface || (window.webkit && window.webkit.messageHandlers.appInterface);
@@ -65,15 +66,25 @@ const NativeInterface = () => {
   useAsyncTask(
     async ({ signal }) => {
       if (user && notificationToken) {
-        window.localStorage.setItem('notificationToken', notificationToken);
-
-        const tokens = user.attributes.notificationTokens?.split(',') || [];
-        if (!tokens.includes(notificationToken)) {
+        try {
+          window.localStorage.setItem('notificationToken', notificationToken);
+        } catch {
+          // Storage restrictions must not prevent server-side token registration.
+        }
+        // Do not overwrite tokens or other attributes using an old Redux snapshot.
+        const currentResponse = await fetchOrThrow('/api/session', { signal });
+        const currentUser = await currentResponse.json();
+        if (signal.aborted || currentUser.id !== user.id) return;
+        const tokens = addNotificationToken(
+          currentUser.attributes?.notificationTokens,
+          notificationToken,
+        );
+        if (tokens !== currentUser.attributes?.notificationTokens) {
           const updatedUser = {
-            ...user,
+            ...currentUser,
             attributes: {
-              ...user.attributes,
-              notificationTokens: [...tokens.slice(-2), notificationToken].join(','),
+              ...currentUser.attributes,
+              notificationTokens: tokens,
             },
           };
 
@@ -83,7 +94,9 @@ const NativeInterface = () => {
             body: JSON.stringify(updatedUser),
             signal,
           });
-          dispatch(sessionActions.updateUser(await response.json()));
+          const registeredUser = await response.json();
+          if (signal.aborted) return;
+          dispatch(sessionActions.updateUser(registeredUser));
         }
         setNotificationToken(null);
       }

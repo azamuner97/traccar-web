@@ -1,5 +1,11 @@
 {
     "sharedLoading": "Loading...",
+    "gameNotificationsDismissBanner": "Dismiss notification",
+    "gameNotificationsCloseHistory": "Close notification history",
+    "gameNotificationsUnread": "Unread game notifications",
+    "gameNotificationsClearHistory": "Clear event and notification history",
+    "gameNotificationsDeleteEntry": "Delete history entry",
+    "gameNotificationsEmpty": "No events or game notifications",
     "sharedHide": "Hide",
     "sharedSave": "Save",
     "sharedSaved": "Saved",
