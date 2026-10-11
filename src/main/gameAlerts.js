@@ -1,7 +1,7 @@
 const gameStateAttribute = 'traccarToolGameState';
 const alertsVersionAttribute = 'traccarToolAlertsVersion';
 const alertsAttribute = 'traccarToolAlerts';
-const generatedRoleAttribute = 'traccarToolGeneratedRole';
+const generatedRoleAttribute = 'traccarToolUserRole';
 const sessionDeviceIdAttribute = 'traccarToolSessionDeviceId';
 
 const alertVersion = 1;

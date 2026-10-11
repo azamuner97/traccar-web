@@ -14,7 +14,7 @@ const now = Date.parse('2026-10-10T12:00:00Z');
 const user = (generatedRole, participantRole = undefined, deviceId = 900) => ({
   id: 5,
   attributes: {
-    traccarToolGeneratedRole: generatedRole,
+    traccarToolUserRole: generatedRole,
     traccarToolSessionDeviceId: deviceId,
     ...(participantRole ? { traccarToolParticipantRole: participantRole } : {}),
   },
