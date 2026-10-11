@@ -37,6 +37,9 @@ export const retainGameNotificationHistory = (items, user, generation, now = Dat
       occurredAt: item.occurredAt,
       timeZone: item.timeZone,
       message: item.message,
+      ...(item.audience === 'user'
+        ? { recipientUserId: item.recipientUserId, sourceDeviceId: item.sourceDeviceId }
+        : {}),
       gameStateDeviceId: item.gameStateDeviceId,
       generation,
       read: item.read,

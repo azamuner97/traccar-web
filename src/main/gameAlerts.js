@@ -1,5 +1,5 @@
 const generatedRoles = new Set(['player', 'supporter', 'hunter', 'spectator']);
-const alertTypes = new Set(['speedhunt', 'playerCaught', 'notificationTest']);
+const sessionAlertTypes = new Set(['speedhunt', 'playerCaught', 'notificationTest']);
 const alertMaxAgeMs = 15 * 60 * 1000;
 export const gameAlertDurationMs = 60000;
 
@@ -16,11 +16,24 @@ export const gameAlertSessionDeviceId = (user) => {
   return Number.isSafeInteger(id) ? id : null;
 };
 
+const positiveId = (value) =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
+
+const assignedDeviceId = (user) => {
+  const value = user?.attributes?.traccarToolAssignedDeviceId;
+  if (!['number', 'string'].includes(typeof value) || !/^[1-9][0-9]*$/.test(String(value)))
+    return null;
+  return positiveId(Number(value));
+};
+
 export const canReceiveGameAlert = (alert, user) =>
   Boolean(
     gameAlertSessionDeviceId(user) &&
-    alert?.audience === 'session' &&
-    alert.gameStateDeviceId === gameAlertSessionDeviceId(user),
+    alert?.gameStateDeviceId === gameAlertSessionDeviceId(user) &&
+    (alert.audience === 'session' ||
+      (alert.audience === 'user' &&
+        alert.recipientUserId === positiveId(user?.id) &&
+        alert.sourceDeviceId === assignedDeviceId(user))),
   );
 
 export const isGameAlertInWindow = (alert, maxAgeMs, now = Date.now()) => {
@@ -49,8 +62,6 @@ export const isValidGameAlert = (alert) => {
     Array.isArray(alert) ||
     typeof alert.id !== 'string' ||
     !/^[A-Za-z0-9_-]{1,64}$/.test(alert.id) ||
-    !alertTypes.has(alert.type) ||
-    alert.audience !== 'session' ||
     typeof alert.message !== 'string' ||
     !alert.message.trim() ||
     alert.message.length > 8192 ||
@@ -58,6 +69,17 @@ export const isValidGameAlert = (alert) => {
     !alert.timeZone.trim()
   )
     return false;
+  const session =
+    alert.audience === 'session' &&
+    sessionAlertTypes.has(alert.type) &&
+    !Object.hasOwn(alert, 'recipientUserId') &&
+    !Object.hasOwn(alert, 'sourceDeviceId');
+  const targeted =
+    alert.audience === 'user' &&
+    alert.type === 'geofenceExit' &&
+    positiveId(alert.recipientUserId) !== null &&
+    positiveId(alert.sourceDeviceId) !== null;
+  if (!session && !targeted) return false;
   try {
     new Intl.DateTimeFormat('en-GB', { timeZone: alert.timeZone });
     return true;

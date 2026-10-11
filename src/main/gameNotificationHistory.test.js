@@ -10,7 +10,11 @@ import {
 const generation = '12345678-1234-1234-1234-123456789abc';
 const user = {
   id: 5,
-  attributes: { traccarToolUserRole: 'hunter', traccarToolSessionDeviceId: 900 },
+  attributes: {
+    traccarToolUserRole: 'hunter',
+    traccarToolSessionDeviceId: 900,
+    traccarToolAssignedDeviceId: 100,
+  },
 };
 const now = Date.parse('2026-10-11T12:00:00Z');
 const alert = (changes = {}) => ({
@@ -47,6 +51,24 @@ test('history validates audience, generation and schema and strips unknown metad
   );
   assert.equal(items.length, 1);
   assert.equal(items[0].privateDevice, undefined);
+});
+test('history keeps this account targeted fields and rejects another recipient', () => {
+  const targeted = alert({
+    id: 'exit',
+    type: 'geofenceExit',
+    audience: 'user',
+    recipientUserId: 5,
+    sourceDeviceId: 100,
+  });
+  const items = retainGameNotificationHistory(
+    [targeted, { ...targeted, id: 'other', recipientUserId: 6 }],
+    user,
+    generation,
+    now,
+  );
+  assert.equal(items.length, 1);
+  assert.equal(items[0].recipientUserId, 5);
+  assert.equal(items[0].sourceDeviceId, 100);
 });
 test('cache scope includes origin, user, device and generation', () => {
   const key = gameNotificationHistoryKey('https://one.test', user, generation);

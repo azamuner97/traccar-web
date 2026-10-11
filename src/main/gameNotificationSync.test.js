@@ -12,7 +12,11 @@ const replacement = '87654321-1234-1234-1234-123456789abc';
 const now = Date.parse('2026-10-11T12:00:00Z');
 const user = {
   id: 5,
-  attributes: { traccarToolUserRole: 'player', traccarToolSessionDeviceId: 900 },
+  attributes: {
+    traccarToolUserRole: 'player',
+    traccarToolSessionDeviceId: 900,
+    traccarToolAssignedDeviceId: 100,
+  },
 };
 const item = (id, changes = {}) => ({
   id,
@@ -61,7 +65,7 @@ const setup = (records = [], cache = createGameNotificationCache(() => null)) =>
         .slice(offset, offset + query.limit)
         .map((entry) => ({ ...entry, generation: activeGeneration }));
       return {
-        version: 1,
+        version: 2,
         sessionDeviceId: 900,
         generation: activeGeneration,
         items,
@@ -163,7 +167,7 @@ test('cancelled/account-changed responses cannot update state', async () => {
   sync.cancel();
   context.setUser(null);
   release({
-    version: 1,
+    version: 2,
     sessionDeviceId: 900,
     generation,
     items: [],
@@ -175,7 +179,7 @@ test('cancelled/account-changed responses cannot update state', async () => {
 });
 test('malformed API versions, stale scope and legacy types fail closed', () => {
   const valid = {
-    version: 1,
+    version: 2,
     sessionDeviceId: 900,
     generation,
     items: [item('one')],
@@ -184,7 +188,7 @@ test('malformed API versions, stale scope and legacy types fail closed', () => {
   };
   assert.equal(validateNotificationPage(valid, user, now), valid);
   for (const changes of [
-    { version: 2 },
+    { version: 1 },
     { sessionDeviceId: 901 },
     { generation: 'invalid' },
     { items: [item('one', { audience: 'participants' })] },
@@ -193,6 +197,27 @@ test('malformed API versions, stale scope and legacy types fail closed', () => {
   ]) {
     assert.throws(() => validateNotificationPage({ ...valid, ...changes }, user, now));
   }
+});
+
+test('targeted pages accept this user and reject another recipient', () => {
+  const targeted = item('exit', {
+    type: 'geofenceExit',
+    audience: 'user',
+    recipientUserId: 5,
+    sourceDeviceId: 100,
+  });
+  const valid = {
+    version: 2,
+    sessionDeviceId: 900,
+    generation,
+    items: [targeted],
+    nextCursor: '1',
+    hasMore: false,
+  };
+  assert.equal(validateNotificationPage(valid, user, now), valid);
+  assert.throws(() =>
+    validateNotificationPage({ ...valid, items: [{ ...targeted, recipientUserId: 6 }] }, user, now),
+  );
 });
 
 test('interrupted pages resume at the processed cursor and present only after completion', async () => {

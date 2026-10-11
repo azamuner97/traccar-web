@@ -33,7 +33,7 @@ const validCursor = (cursor) =>
 
 export const validateNotificationPage = (page, user, now = Date.now()) => {
   if (
-    page?.version !== 1 ||
+    page?.version !== 2 ||
     page.sessionDeviceId !== gameAlertSessionDeviceId(user) ||
     !(page.generation === null || isNotificationGeneration(page.generation)) ||
     !Array.isArray(page.items) ||

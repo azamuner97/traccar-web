@@ -13,7 +13,11 @@ import {
 const now = Date.parse('2026-10-11T12:00:00Z');
 const user = (role = 'player', device = 900) => ({
   id: 5,
-  attributes: { traccarToolUserRole: role, traccarToolSessionDeviceId: device },
+  attributes: {
+    traccarToolUserRole: role,
+    traccarToolSessionDeviceId: device,
+    ...(role === 'spectator' ? {} : { traccarToolAssignedDeviceId: 100 }),
+  },
 });
 const alert = (changes = {}) => ({
   id: 'one',
@@ -50,6 +54,34 @@ test('schema rejects legacy audiences, unknown types, invalid fields and timezon
     { timeZone: null },
   ]) {
     assert.equal(isValidGameAlert(alert(changes)), false);
+  }
+});
+test('targeted geofence exits reach only the assigned account', () => {
+  const targeted = alert({
+    type: 'geofenceExit',
+    audience: 'user',
+    recipientUserId: 5,
+    sourceDeviceId: 100,
+  });
+  assert.ok(isValidGameAlert(targeted));
+  assert.ok(canReceiveGameAlert(targeted, user('hunter')));
+  assert.equal(canReceiveGameAlert(targeted, { ...user('hunter'), id: 6 }), false);
+  assert.equal(
+    canReceiveGameAlert(targeted, {
+      ...user('hunter'),
+      attributes: { ...user('hunter').attributes, traccarToolAssignedDeviceId: 101 },
+    }),
+    false,
+  );
+  assert.equal(canReceiveGameAlert(targeted, user('spectator')), false);
+  for (const invalid of [
+    { type: 'geofenceExit' },
+    { audience: 'user', recipientUserId: 5, sourceDeviceId: 100 },
+    { type: 'geofenceExit', audience: 'user', recipientUserId: 5 },
+    { type: 'geofenceExit', audience: 'user', recipientUserId: 5, sourceDeviceId: 0 },
+    { recipientUserId: null, sourceDeviceId: null },
+  ]) {
+    assert.equal(isValidGameAlert(alert(invalid)), false);
   }
 });
 test('invalid session identifiers fail closed', () => {
