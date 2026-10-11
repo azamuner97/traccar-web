@@ -9,7 +9,12 @@ const alertMaxAgeMs = 15 * 60 * 1000;
 const futureToleranceMs = 60 * 1000;
 const handledAlertMaxAgeMs = 24 * 60 * 60 * 1000;
 const handledAlertLimit = 100;
-const typeAudiences = { speedhunt: 'participants', playerCaught: 'session' };
+const typeAudiences = {
+  // Keep old participant-only records readable without widening their audience.
+  speedhunt: ['participants', 'session'],
+  playerCaught: ['session'],
+  notificationTest: ['session'],
+};
 const participantRoles = new Set(['player', 'supporter']);
 const generatedRoles = new Set(['player', 'supporter', 'hunter', 'spectator']);
 
@@ -67,7 +72,7 @@ export const isValidGameAlert = (alert) => {
     !alert.id.trim() ||
     typeof alert.type !== 'string' ||
     !Object.hasOwn(typeAudiences, alert.type) ||
-    typeAudiences[alert.type] !== alert.audience ||
+    !typeAudiences[alert.type].includes(alert.audience) ||
     typeof alert.message !== 'string' ||
     !alert.message.trim()
   )

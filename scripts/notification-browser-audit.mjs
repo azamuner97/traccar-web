@@ -87,7 +87,7 @@ try {
         return {
           id,
           type: caught ? 'playerCaught' : 'speedhunt',
-          audience: caught ? 'session' : 'participants',
+          audience: 'session',
           occurredAt,
           timeZone: 'Europe/Zurich',
           message: `[${time}] ${caught ? `${id} was caught` : 'Speedhunt: Ping 1 out of 4 sent.'}`,
@@ -295,7 +295,7 @@ try {
 
   // Permission/session changes and logout clear presentation, not another user's history.
   await page.evaluate(() => window.notificationAudit.setVisible(false));
-  const revoked = await makeAlert('revoked');
+  const revoked = { ...(await makeAlert('revoked')), audience: 'participants' };
   await emit([revoked]);
   await page.evaluate(() => window.notificationAudit.setRole('hunter'));
   await page.evaluate(() => window.notificationAudit.setVisible(true));
@@ -357,6 +357,33 @@ try {
   assert.equal(await soundCount(), beforeBatch + 1, 'replayed batch cannot replace or sound');
   await dismiss();
   assert.equal(await banner.count(), 0);
+
+  // Updated Speedhunt and test notifications use the identical UI/sound/history
+  // path for every session role, including hunters and the spectator account.
+  for (const role of ['player', 'supporter', 'hunter', 'spectator']) {
+    await page.evaluate((value) => window.notificationAudit.setRole(value), role);
+    const speedhunt = await makeAlert(`speedhunt-${role}`);
+    const testNotification = {
+      ...(await makeAlert(`test-${role}`)),
+      type: 'notificationTest',
+      message: speedhunt.message.replace(
+        'Speedhunt: Ping 1 out of 4 sent.',
+        'Test notification: check that your phone plays a sound.',
+      ),
+    };
+    const beforeRole = await soundCount();
+    await emit([speedhunt]);
+    await banner.getByText(speedhunt.message).waitFor();
+    assert.equal(await soundCount(), beforeRole + 1);
+    await emit([testNotification]);
+    await banner.getByText(testNotification.message).waitFor();
+    assert.equal(await soundCount(), beforeRole + 2);
+    assert.ok((await historyIds()).includes(speedhunt.id));
+    assert.ok((await historyIds()).includes(testNotification.id));
+    await emit([speedhunt, testNotification]);
+    assert.equal(await soundCount(), beforeRole + 2, 'all-role replay must remain silent');
+    await dismiss();
+  }
   assert.deepEqual(errors, []);
   console.log(
     `${mobileManager ? 'Mobile Manager bridge' : 'Browser'} notification audit passed: instant newest-alert preemption/sound, fresh 60s timeout/dismissal, actual drawer/map icon, unread/hidden state, merged navigation, dates, deletion/dedup, reload, expiry, permissions, four phones and logout.`,

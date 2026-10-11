@@ -43,12 +43,33 @@ const alert = (overrides = {}) => ({
   ...overrides,
 });
 
-test('participant alerts are visible only to players and supporters in the session', () => {
+test('legacy participant alerts retain their original player/supporter audience', () => {
   assert.equal(parseGameAlerts(position([alert()]), user('player'), now).length, 1);
   assert.equal(parseGameAlerts(position([alert()]), user('supporter'), now).length, 1);
   assert.equal(parseGameAlerts(position([alert()]), user('hunter'), now).length, 0);
   assert.equal(parseGameAlerts(position([alert()]), user('hunter', 'player'), now).length, 0);
   assert.equal(parseGameAlerts(position([alert()]), user('player', 'player', 901), now).length, 0);
+});
+
+test('new Speedhunt and notification-test alerts reach every generated session role only', () => {
+  for (const type of ['speedhunt', 'notificationTest', 'playerCaught']) {
+    const record = alert({ type, audience: 'session' });
+    for (const role of ['player', 'supporter', 'hunter', 'spectator']) {
+      assert.equal(parseGameAlerts(position([record]), user(role), now).length, 1);
+      assert.equal(parseGameAlerts(position([record]), user(role, undefined, 901), now).length, 0);
+    }
+    for (const current of [
+      user('admin'),
+      user('unknown'),
+      { ...user('player'), administrator: true },
+    ]) {
+      assert.deepEqual(parseGameAlerts(position([record]), current, now), []);
+    }
+  }
+  assert.deepEqual(
+    parseGameAlerts(position([alert({ type: 'notificationTest' })]), user('player'), now),
+    [],
+  );
 });
 
 test('session alerts include every generated session role but not administrators', () => {
@@ -165,7 +186,7 @@ test('invalid session/device IDs cannot authorize an alert', () => {
 
 test('alert type determines audience and timestamps must be recent, UTC and plausible', () => {
   assert.deepEqual(
-    parseGameAlerts(position([alert({ audience: 'session' })]), user('hunter'), now),
+    parseGameAlerts(position([alert({ audience: 'unknown' })]), user('hunter'), now),
     [],
   );
   assert.deepEqual(

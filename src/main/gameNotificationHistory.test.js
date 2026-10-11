@@ -89,6 +89,30 @@ test('history is newest-first, deduplicated, and bounded to 100 records', () => 
   assert.equal(retained.at(-1).id, '99');
 });
 
+test('session Speedhunt and test alerts survive history reload for hunters and spectators', () => {
+  for (const role of ['hunter', 'spectator']) {
+    const current = { ...user, attributes: { ...user.attributes, traccarToolUserRole: role } };
+    const records = [
+      alert({ id: 'speedhunt', audience: 'session' }),
+      alert({ id: 'test', type: 'notificationTest', audience: 'session' }),
+      alert({ id: 'caught', type: 'playerCaught', audience: 'session' }),
+    ];
+    const storage = { getItem: () => JSON.stringify({ version: 1, items: records }) };
+    assert.equal(loadGameNotificationHistory(storage, 'key', current, now).length, 3);
+    assert.deepEqual(
+      retainGameNotificationHistory(
+        records,
+        {
+          ...current,
+          attributes: { ...current.attributes, traccarToolSessionDeviceId: 901 },
+        },
+        now,
+      ),
+      [],
+    );
+  }
+});
+
 test('storage keys isolate server origin, account and game session', () => {
   const key = gameNotificationHistoryKey('https://one.test', user);
   assert.notEqual(key, gameNotificationHistoryKey('https://two.test', user));
