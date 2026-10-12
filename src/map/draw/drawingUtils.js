@@ -182,20 +182,20 @@ export const drawingsToFeatureCollection = (drawings, transform = (position) => 
   return { type: 'FeatureCollection', features };
 };
 
-export const staticDrawingFilter = (types, editingOwnerId) => {
+export const staticDrawingFilter = (types, editingDrawingIds = []) => {
   const typeFilter = ['in', ['get', 'drawingType'], ['literal', types]];
-  return editingOwnerId == null
+  return !editingDrawingIds?.length
     ? typeFilter
-    : ['all', typeFilter, ['!=', ['get', 'ownerId'], editingOwnerId]];
+    : ['all', typeFilter, ['!', ['in', ['get', 'drawingId'], ['literal', editingDrawingIds]]]];
 };
 
 export const nextDrawingDeleteMode = (currentMode, requestedMode) =>
   currentMode === requestedMode ? null : requestedMode;
 
 export const canDeleteDrawingInMode = (mode, drawing, user) => {
-  if (!drawing || !user) return false;
+  if (!canDeleteDrawing(drawing, user)) return false;
   if (mode === 'own') return drawing.ownerId === user.id;
-  if (mode === 'foreign') return Boolean(user.administrator && drawing.ownerId !== user.id);
+  if (mode === 'foreign') return drawing.ownerId !== user.id;
   return false;
 };
 
@@ -204,3 +204,16 @@ export const canEditDrawings = (user) =>
     user?.administrator ||
     (!user?.disableDrawings && user?.attributes?.traccarToolUserRole !== 'spectator'),
   );
+
+export const canEditDrawing = (drawing, user) => {
+  if (!drawing || !user || !canEditDrawings(user)) return false;
+  if (typeof drawing.canEdit === 'boolean') return drawing.canEdit;
+  // An older server never grants group editing through missing capabilities.
+  return drawing.ownerId === user.id;
+};
+
+export const canDeleteDrawing = (drawing, user) => {
+  if (!drawing || !user || !canEditDrawings(user)) return false;
+  if (typeof drawing.canDelete === 'boolean') return drawing.canDelete;
+  return Boolean(user.administrator || drawing.ownerId === user.id);
+};

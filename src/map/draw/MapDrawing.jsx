@@ -46,6 +46,8 @@ import { drawingsActions, errorsActions } from '../../store';
 import { useTranslation } from '../../common/components/LocalizationProvider';
 import {
   canDeleteDrawingInMode,
+  canDeleteDrawing,
+  canEditDrawing,
   canEditDrawings,
   createArrowheadSdfImage,
   DEFAULT_DRAWING_TEXT_SIZE,
@@ -107,7 +109,7 @@ const DrawingControls = ({
   visible,
   expanded,
   editable,
-  administrator,
+  canDeleteOthers,
   activeMode,
   selected,
   color,
@@ -229,7 +231,7 @@ const DrawingControls = ({
         </DrawingButton>
       </>
     )}
-    {expanded && visible && administrator && (
+    {expanded && visible && canDeleteOthers && (
       <DrawingButton
         title={t('mapDrawingDeleteOther')}
         active={deleteMode === 'foreign'}
@@ -262,7 +264,7 @@ const useDrawingArrowheadImage = (enabled) => {
   return imageReady;
 };
 
-const MapDrawingLayer = ({ drawings, enabled, editingOwnerId, onDrawingClick }) => {
+const MapDrawingLayer = ({ drawings, enabled, editingDrawingIds, onDrawingClick }) => {
   const t = useTranslation();
   const popupRef = useRef();
   const arrowheadReady = useDrawingArrowheadImage(enabled);
@@ -277,7 +279,7 @@ const MapDrawingLayer = ({ drawings, enabled, editingOwnerId, onDrawingClick }) 
   const showOwner = useCallback(
     (event) => {
       const feature = event.features[0];
-      if (Number(feature.properties.ownerId) === editingOwnerId) return;
+      if (editingDrawingIds.includes(Number(feature.properties.drawingId))) return;
       popupRef.current?.remove();
       const content = document.createElement('div');
       content.textContent = `${t('mapDrawingOwner')}: ${feature.properties.ownerName}`;
@@ -286,26 +288,26 @@ const MapDrawingLayer = ({ drawings, enabled, editingOwnerId, onDrawingClick }) 
         .setDOMContent(content)
         .addTo(map);
     },
-    [editingOwnerId, t],
+    [editingDrawingIds, t],
   );
 
   const onClick = useCallback(
     (event) => {
-      if (Number(event.features[0].properties.ownerId) === editingOwnerId) return;
+      if (editingDrawingIds.includes(Number(event.features[0].properties.drawingId))) return;
       event.preventDefault();
       if (onDrawingClick(event.features[0].properties.drawingId)) return;
       showOwner(event);
     },
-    [editingOwnerId, onDrawingClick, showOwner],
+    [editingDrawingIds, onDrawingClick, showOwner],
   );
 
   const onMouseEnter = useCallback(
     (event) => {
-      if (Number(event.features[0].properties.ownerId) === editingOwnerId) return;
+      if (editingDrawingIds.includes(Number(event.features[0].properties.drawingId))) return;
       map.getCanvas().style.cursor = 'pointer';
       showOwner(event);
     },
-    [editingOwnerId, showOwner],
+    [editingDrawingIds, showOwner],
   );
   const onMouseLeave = useCallback(() => {
     map.getCanvas().style.cursor = '';
@@ -322,7 +324,7 @@ const MapDrawingLayer = ({ drawings, enabled, editingOwnerId, onDrawingClick }) 
       {
         key: 'fill',
         type: 'fill',
-        filter: staticDrawingFilter(['polygon', 'rectangle', 'circle'], editingOwnerId),
+        filter: staticDrawingFilter(['polygon', 'rectangle', 'circle'], editingDrawingIds),
         paint: {
           'fill-color': ['get', 'color'],
           'fill-opacity': 0.18,
@@ -334,7 +336,7 @@ const MapDrawingLayer = ({ drawings, enabled, editingOwnerId, onDrawingClick }) 
         type: 'line',
         filter: staticDrawingFilter(
           ['line', 'arrow', 'polygon', 'rectangle', 'circle'],
-          editingOwnerId,
+          editingDrawingIds,
         ),
         paint: {
           'line-color': ['get', 'color'],
@@ -362,11 +364,11 @@ const MapDrawingLayer = ({ drawings, enabled, editingOwnerId, onDrawingClick }) 
         on: events,
       },
     ],
-    layersDeps: [events, editingOwnerId, arrowheadReady],
+    layersDeps: [events, editingDrawingIds, arrowheadReady],
     data: drawingsToFeatureCollection(drawings, ([longitude, latitude]) =>
       toMapCoordinates(longitude, latitude),
     ),
-    dataDeps: [drawings, editingOwnerId, events],
+    dataDeps: [drawings, editingDrawingIds, events],
   });
 
   return null;
@@ -375,7 +377,7 @@ const MapDrawingLayer = ({ drawings, enabled, editingOwnerId, onDrawingClick }) 
 const MapDrawingTextMarkers = ({
   drawings,
   enabled,
-  editingOwnerId,
+  editingDrawingIds,
   selectedDrawingId,
   onEditDrawing,
   onDrawingClick,
@@ -416,7 +418,7 @@ const MapDrawingTextMarkers = ({
         };
         const handleClick = (event) => {
           event.stopPropagation();
-          if (drawing.ownerId === editingOwnerId && onEditDrawing(drawing.id)) return;
+          if (editingDrawingIds.includes(drawing.id) && onEditDrawing(drawing.id)) return;
           if (!onDrawingClick(drawing.id)) showOwner();
         };
         element.onmouseenter = showOwner;
@@ -438,7 +440,7 @@ const MapDrawingTextMarkers = ({
         };
       });
     return () => markers.forEach((marker) => marker.remove());
-  }, [drawings, editingOwnerId, enabled, onDrawingClick, onEditDrawing, selectedDrawingId, t]);
+  }, [drawings, editingDrawingIds, enabled, onDrawingClick, onEditDrawing, selectedDrawingId, t]);
 
   return null;
 };
@@ -454,6 +456,9 @@ const MapDrawing = ({ active, onActiveChange }) => {
   const drawingItems = useSelector((state) => state.drawings.items);
   const drawings = useMemo(() => Object.values(drawingItems), [drawingItems]);
   const editable = canEditDrawings(user);
+  const canDeleteOthers = drawings.some(
+    (drawing) => drawing.ownerId !== user.id && canDeleteDrawing(drawing, user),
+  );
   const visibilityKey = drawingVisibilityKey(user.id);
   const expandedKey = drawingToolbarExpandedKey(user.id);
 
@@ -537,6 +542,16 @@ const MapDrawing = ({ active, onActiveChange }) => {
   const writeFeature = useCallback(
     async (feature, drawingType, drawingColor, drawingText) => {
       const existingId = Number(feature.properties.drawingId) || null;
+      if (
+        existingId &&
+        !canEditDrawing(
+          drawingsRef.current.find((item) => item.id === existingId),
+          user,
+        )
+      ) {
+        await refresh();
+        return false;
+      }
       const payload = editableFeatureToDrawing(
         feature,
         drawingType,
@@ -572,30 +587,53 @@ const MapDrawing = ({ active, onActiveChange }) => {
         return false;
       }
     },
-    [dispatch, refresh],
+    [dispatch, refresh, user],
   );
 
   const syncEditor = useCallback(() => {
     const draw = drawRef.current;
-    if (!draw?.enabled || draw.getModeState() === 'drawing') return;
+    if (!draw?.enabled) return;
     const existing = draw
       .getSnapshot()
       .filter((feature) => feature.properties.drawingId)
+      .filter(
+        (feature) =>
+          draw.getModeState() !== 'drawing' ||
+          !canEditDrawing(
+            drawingsRef.current.find((item) => item.id === feature.properties.drawingId),
+            user,
+          ),
+      )
       .map((feature) => feature.id);
     if (existing.length) draw.removeFeatures(existing);
-    const ownFeatures = drawingsRef.current
-      .filter((drawing) => drawing.ownerId === user.id)
+    if (draw.getModeState() === 'drawing') return;
+    const editableFeatures = drawingsRef.current
+      .filter((drawing) => canEditDrawing(drawing, user))
       .map((drawing) =>
         drawingToEditableFeature(drawing, ([longitude, latitude]) =>
           toMapCoordinates(longitude, latitude),
         ),
       );
-    if (ownFeatures.length) draw.addFeatures(ownFeatures);
-  }, [user.id]);
+    if (editableFeatures.length) draw.addFeatures(editableFeatures);
+  }, [user]);
 
   useEffect(() => {
     syncEditor();
   }, [drawings, syncEditor]);
+
+  useEffect(() => {
+    const feature =
+      pendingProperties && drawRef.current?.getSnapshotFeature(pendingProperties.featureId);
+    if (
+      pendingProperties &&
+      !pendingProperties.isNew &&
+      (!feature || !canEditDrawing(drawingItems[feature.properties.drawingId], user))
+    ) {
+      setPendingProperties(null);
+    }
+    if (selectedId && !drawRef.current?.hasFeature(selectedId)) setSelectedId(null);
+    if (deleteMode === 'foreign' && !canDeleteOthers) setDeleteMode(null);
+  }, [canDeleteOthers, deleteMode, drawingItems, pendingProperties, selectedId, user]);
 
   useEffect(() => {
     if (!active || !visible || !editable || deleteMode) return undefined;
@@ -853,7 +891,7 @@ const MapDrawing = ({ active, onActiveChange }) => {
         visible={visible}
         expanded={expanded}
         editable={editable}
-        administrator={user.administrator}
+        canDeleteOthers={canDeleteOthers}
         activeMode={activeMode}
         selected={Boolean(selectedId)}
         color={color}
@@ -890,12 +928,18 @@ const MapDrawing = ({ active, onActiveChange }) => {
     updateVisible,
     updateExpanded,
     t,
-    user.administrator,
+    canDeleteOthers,
     visible,
     toggleDeleteMode,
   ]);
 
-  const editingOwnerId = active && editable && !deleteMode ? user.id : null;
+  const editingDrawingIds = useMemo(
+    () =>
+      active && editable && !deleteMode
+        ? drawings.filter((drawing) => canEditDrawing(drawing, user)).map((drawing) => drawing.id)
+        : [],
+    [active, deleteMode, drawings, editable, user],
+  );
   const selectedDrawingId = Number(
     selectedId && drawRef.current?.getSnapshotFeature(selectedId)?.properties.drawingId,
   );
@@ -905,13 +949,13 @@ const MapDrawing = ({ active, onActiveChange }) => {
       <MapDrawingLayer
         drawings={drawings}
         enabled={visible}
-        editingOwnerId={editingOwnerId}
+        editingDrawingIds={editingDrawingIds}
         onDrawingClick={handleDrawingClick}
       />
       <MapDrawingTextMarkers
         drawings={drawings}
         enabled={visible}
-        editingOwnerId={editingOwnerId}
+        editingDrawingIds={editingDrawingIds}
         selectedDrawingId={selectedDrawingId || null}
         onEditDrawing={selectTextDrawing}
         onDrawingClick={handleDrawingClick}

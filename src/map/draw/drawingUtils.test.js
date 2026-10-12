@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
   arrowBearing,
   canDeleteDrawingInMode,
+  canDeleteDrawing,
+  canEditDrawing,
   canEditDrawings,
   createArrowheadSdfImage,
   DEFAULT_DRAWING_TEXT_SIZE,
@@ -146,17 +148,17 @@ test('arrowhead decoration is generated as a triangle SDF', () => {
   assert.ok(alpha(16, 16) > 128);
 });
 
-test('static geometry is filtered only for the owner being edited', () => {
+test('static geometry excludes editable drawing IDs, including teammates', () => {
   const types = ['line', 'arrow'];
   assert.deepEqual(staticDrawingFilter(types, null), [
     'in',
     ['get', 'drawingType'],
     ['literal', types],
   ]);
-  assert.deepEqual(staticDrawingFilter(types, 7), [
+  assert.deepEqual(staticDrawingFilter(types, [7, 8]), [
     'all',
     ['in', ['get', 'drawingType'], ['literal', types]],
-    ['!=', ['get', 'ownerId'], 7],
+    ['!', ['in', ['get', 'drawingId'], ['literal', [7, 8]]]],
   ]);
 });
 
@@ -215,4 +217,23 @@ test('drawing erase modes are mutually exclusive and restrict eligible targets',
   assert.equal(canDeleteDrawingInMode('foreign', foreign, user), true);
   assert.equal(canDeleteDrawingInMode('foreign', foreign, { id: 7, administrator: false }), false);
   assert.equal(canDeleteDrawingInMode(null, own, user), false);
+});
+
+test('server capabilities authorize shared editing and deletion without trusting ownership', () => {
+  const user = { id: 7, disableDrawings: false, attributes: {} };
+  const shared = { id: 10, ownerId: 8, canEdit: true, canDelete: true };
+  assert.equal(canEditDrawing(shared, user), true);
+  assert.equal(canDeleteDrawingInMode('foreign', shared, user), true);
+  assert.equal(canDeleteDrawingInMode('own', shared, user), false);
+  assert.equal(canEditDrawing({ ...shared, canEdit: false }, user), false);
+  assert.equal(canDeleteDrawing({ ...shared, canDelete: false }, user), false);
+  assert.equal(canEditDrawing(shared, { ...user, disableDrawings: true }), false);
+  assert.equal(
+    canDeleteDrawing(shared, { ...user, attributes: { traccarToolUserRole: 'spectator' } }),
+    false,
+  );
+  assert.equal(canEditDrawing({ id: 10, ownerId: 8 }, user), false);
+  assert.equal(canDeleteDrawing({ id: 10, ownerId: 8 }, user), false);
+  assert.equal(canEditDrawing({ id: 10, ownerId: 7 }, user), true);
+  assert.equal(canEditDrawing({ id: 10, ownerId: 7, canEdit: false }, user), false);
 });
