@@ -45,6 +45,11 @@ import fetchOrThrow from '../../common/util/fetchOrThrow';
 import { drawingsActions, errorsActions } from '../../store';
 import { useTranslation } from '../../common/components/LocalizationProvider';
 import {
+  createDrawingEditorSync,
+  DRAWING_SELECT_FLAGS,
+  finishDrawingInteraction,
+} from './drawingEditor';
+import {
   canDeleteDrawingInMode,
   canDeleteDrawing,
   canEditDrawing,
@@ -55,7 +60,6 @@ import {
   drawingToolbarExpandedKey,
   drawingVisibilityKey,
   drawingFeatureId,
-  drawingToEditableFeature,
   drawingsToFeatureCollection,
   editableFeatureToDrawing,
   loadDrawingVisibility,
@@ -479,6 +483,8 @@ const MapDrawing = ({ active, onActiveChange }) => {
   const [textItalic, setTextItalic] = useState(false);
 
   const drawRef = useRef();
+  const drawingSyncRef = useRef();
+  const userRef = useRef(user);
   const onActiveChangeRef = useRef(onActiveChange);
   const drawingsRef = useRef(drawings);
   const requestedModeRef = useRef(requestedMode);
@@ -486,6 +492,7 @@ const MapDrawing = ({ active, onActiveChange }) => {
   const deletingIdsRef = useRef(new Set());
   const wasActiveRef = useRef(active);
   drawingsRef.current = drawings;
+  userRef.current = user;
   requestedModeRef.current = requestedMode;
   colorRef.current = color;
   onActiveChangeRef.current = onActiveChange;
@@ -546,7 +553,7 @@ const MapDrawing = ({ active, onActiveChange }) => {
         existingId &&
         !canEditDrawing(
           drawingsRef.current.find((item) => item.id === existingId),
-          user,
+          userRef.current,
         )
       ) {
         await refresh();
@@ -587,39 +594,16 @@ const MapDrawing = ({ active, onActiveChange }) => {
         return false;
       }
     },
-    [dispatch, refresh, user],
+    [dispatch, refresh],
   );
 
   const syncEditor = useCallback(() => {
-    const draw = drawRef.current;
-    if (!draw?.enabled) return;
-    const existing = draw
-      .getSnapshot()
-      .filter((feature) => feature.properties.drawingId)
-      .filter(
-        (feature) =>
-          draw.getModeState() !== 'drawing' ||
-          !canEditDrawing(
-            drawingsRef.current.find((item) => item.id === feature.properties.drawingId),
-            user,
-          ),
-      )
-      .map((feature) => feature.id);
-    if (existing.length) draw.removeFeatures(existing);
-    if (draw.getModeState() === 'drawing') return;
-    const editableFeatures = drawingsRef.current
-      .filter((drawing) => canEditDrawing(drawing, user))
-      .map((drawing) =>
-        drawingToEditableFeature(drawing, ([longitude, latitude]) =>
-          toMapCoordinates(longitude, latitude),
-        ),
-      );
-    if (editableFeatures.length) draw.addFeatures(editableFeatures);
-  }, [user]);
+    drawingSyncRef.current?.(drawingsRef.current, userRef.current);
+  }, []);
 
   useEffect(() => {
     syncEditor();
-  }, [drawings, syncEditor]);
+  }, [drawings, syncEditor, user]);
 
   useEffect(() => {
     const feature =
@@ -642,23 +626,7 @@ const MapDrawing = ({ active, onActiveChange }) => {
       adapter: new TerraDrawMapLibreGLAdapter({ map, prefixId: 'map-drawing-editor' }),
       modes: [
         new TerraDrawSelectMode({
-          flags: {
-            linestring: {
-              feature: {
-                draggable: true,
-                coordinates: { draggable: true, midpoints: true, deletable: true },
-              },
-            },
-            polygon: {
-              feature: {
-                draggable: true,
-                coordinates: { draggable: true, midpoints: true, deletable: true },
-              },
-            },
-            rectangle: { feature: { draggable: true, scaleable: true } },
-            circle: { feature: { draggable: true, scaleable: true } },
-            point: { feature: { draggable: true } },
-          },
+          flags: DRAWING_SELECT_FLAGS,
           keyEvents: { deselect: 'Escape', delete: null, rotate: null, scale: null },
         }),
         new TerraDrawLineStringMode({
@@ -686,6 +654,9 @@ const MapDrawing = ({ active, onActiveChange }) => {
       ],
     });
     drawRef.current = draw;
+    drawingSyncRef.current = createDrawingEditorSync(draw, ([longitude, latitude]) =>
+      toMapCoordinates(longitude, latitude),
+    );
     draw.on('select', (id) => {
       setSelectedId(id);
       const feature = draw.getSnapshotFeature(id);
@@ -717,9 +688,10 @@ const MapDrawing = ({ active, onActiveChange }) => {
         setTextItalic(false);
       } else {
         writeFeature(updatedFeature, drawingType, drawingColor);
-        setRequestedMode('select');
-        setActiveMode('select');
-        draw.setMode('select');
+        if (finishDrawingInteraction(draw, updatedFeature)) {
+          setRequestedMode('select');
+          setActiveMode('select');
+        }
       }
     });
     draw.start();
@@ -728,11 +700,14 @@ const MapDrawing = ({ active, onActiveChange }) => {
     setActiveMode(requestedModeRef.current);
     return () => {
       draw.stop();
-      if (drawRef.current === draw) drawRef.current = null;
+      if (drawRef.current === draw) {
+        drawRef.current = null;
+        drawingSyncRef.current = null;
+      }
       setSelectedId(null);
       setActiveMode(null);
     };
-  }, [active, deleteMode, editable, syncEditor, visible, writeFeature]);
+  }, [active, deleteMode, editable, syncEditor, user.id, visible, writeFeature]);
 
   useEffect(() => {
     const draw = drawRef.current;
