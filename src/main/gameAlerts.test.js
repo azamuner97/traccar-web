@@ -74,6 +74,16 @@ test('targeted geofence exits reach only the assigned account', () => {
     false,
   );
   assert.equal(canReceiveGameAlert(targeted, user('spectator')), false);
+  assert.equal(
+    canReceiveGameAlert(targeted, {
+      ...user('spectator'),
+      attributes: {
+        ...user('spectator').attributes,
+        traccarToolAssignedDeviceId: 100,
+      },
+    }),
+    false,
+  );
   for (const invalid of [
     { type: 'geofenceExit' },
     { audience: 'user', recipientUserId: 5, sourceDeviceId: 100 },

@@ -1,4 +1,5 @@
 const generatedRoles = new Set(['player', 'supporter', 'hunter', 'spectator']);
+const targetedRoles = new Set(['player', 'supporter', 'hunter']);
 const sessionAlertTypes = new Set(['speedhunt', 'playerCaught', 'notificationTest']);
 const alertMaxAgeMs = 15 * 60 * 1000;
 export const gameAlertDurationMs = 60000;
@@ -32,6 +33,7 @@ export const canReceiveGameAlert = (alert, user) =>
     alert?.gameStateDeviceId === gameAlertSessionDeviceId(user) &&
     (alert.audience === 'session' ||
       (alert.audience === 'user' &&
+        targetedRoles.has(user?.attributes?.traccarToolUserRole) &&
         alert.recipientUserId === positiveId(user?.id) &&
         alert.sourceDeviceId === assignedDeviceId(user))),
   );
