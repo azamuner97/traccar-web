@@ -5,6 +5,7 @@ export const emptyGameNotificationState = () => ({
   key: null,
   generation: null,
   permission: null,
+  personalSourceDeviceId: null,
   items: [],
   handled: [],
   deleted: [],
@@ -55,6 +56,7 @@ const { reducer, actions } = createSlice({
         payload.user,
         state.generation,
         payload.now,
+        state.personalSourceDeviceId,
       );
       state.handled = [...handled];
       state.cursor = payload.cursor;
@@ -74,6 +76,7 @@ const { reducer, actions } = createSlice({
         payload.user,
         state.generation,
         payload.now,
+        state.personalSourceDeviceId,
       );
     },
     delete(state, { payload }) {

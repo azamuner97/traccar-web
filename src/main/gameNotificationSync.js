@@ -40,6 +40,13 @@ export const validateNotificationPage = (page, user, now = Date.now()) => {
     !Array.isArray(page.items) ||
     !validCursor(page.nextCursor) ||
     typeof page.hasMore !== 'boolean' ||
+    !(
+      page.personalSourceDeviceId === null ||
+      (Number.isSafeInteger(page.personalSourceDeviceId) &&
+        page.personalSourceDeviceId > 0 &&
+        page.personalSourceDeviceId === Number(user?.attributes?.traccarToolAssignedDeviceId) &&
+        ['player', 'supporter', 'hunter'].includes(user?.attributes?.traccarToolUserRole))
+    ) ||
     (page.generation === null && (page.items.length || page.hasMore))
   ) {
     throw new Error('Invalid notification history response');
@@ -48,7 +55,7 @@ export const validateNotificationPage = (page, user, now = Date.now()) => {
     if (
       !isValidGameAlert(item) ||
       !isGameAlertInWindow(item, Infinity, now) ||
-      !canReceiveGameAlert(item, user) ||
+      !canReceiveGameAlert(item, user, page.personalSourceDeviceId) ||
       item.generation !== page.generation
     ) {
       throw new Error('Invalid notification history record');
@@ -85,12 +92,30 @@ export const createGameNotificationSync = ({
     account === gameNotificationAccountKey(origin, getUser()) &&
     permission === gameAlertPermissionKey(getUser());
 
-  const hydrate = async (generation, discardPrevious = false) => {
+  const hydrate = async (generation, personalSourceDeviceId, discardPrevious = false) => {
     const key = gameNotificationHistoryKey(origin, getUser(), generation);
-    if (getState().key === key && getState().permission === permission) return;
+    if (
+      getState().key === key &&
+      getState().permission === permission &&
+      (personalSourceDeviceId === undefined ||
+        getState().personalSourceDeviceId === personalSourceDeviceId)
+    )
+      return;
     const cached = await cache.load(key);
     if (!current()) return;
-    const retained = retainGameNotificationHistory(cached?.items, getUser(), generation, now());
+    const sourceDeviceId =
+      personalSourceDeviceId === undefined
+        ? Number.isSafeInteger(cached?.personalSourceDeviceId)
+          ? cached.personalSourceDeviceId
+          : null
+        : personalSourceDeviceId;
+    const retained = retainGameNotificationHistory(
+      cached?.items,
+      getUser(),
+      generation,
+      now(),
+      sourceDeviceId,
+    );
     const deleted = ids(cached?.deleted);
     const deletedIds = new Set(deleted);
     const clearBefore = Number.isFinite(cached?.clearBefore) ? cached.clearBefore : null;
@@ -102,6 +127,7 @@ export const createGameNotificationSync = ({
     const validSnapshot =
       cached?.generation === generation &&
       cached?.permission === permission &&
+      cached?.personalSourceDeviceId === sourceDeviceId &&
       Array.isArray(cached.items) &&
       retained.length === cached.items.length &&
       Array.isArray(cached.handled) &&
@@ -112,6 +138,7 @@ export const createGameNotificationSync = ({
       key,
       generation,
       permission,
+      personalSourceDeviceId: sourceDeviceId,
       items,
       handled: ids([...ids(cached?.handled), ...retained.map((item) => item.id)]),
       deleted,
@@ -149,12 +176,16 @@ export const createGameNotificationSync = ({
           status({ loading: false });
           return;
         }
-        await hydrate(metadata.generation, true);
+        await hydrate(metadata.generation, metadata.personalSourceDeviceId, true);
         if (!current()) return;
         const key = gameNotificationHistoryKey(origin, getUser(), metadata.generation);
         if (pendingKey !== key) {
           pending.clear();
           pendingKey = key;
+        }
+        for (const [id, item] of pending) {
+          if (!canReceiveGameAlert(item, getUser(), metadata.personalSourceDeviceId))
+            pending.delete(id);
         }
         let cursor = getState().cursor;
         while (current()) {
@@ -178,6 +209,11 @@ export const createGameNotificationSync = ({
             (page.hasMore && BigInt(page.nextCursor) === BigInt(cursor))
           ) {
             throw new Error('Notification history cursor did not advance');
+          }
+          if (page.personalSourceDeviceId !== metadata.personalSourceDeviceId) {
+            await hydrate(page.generation, page.personalSourceDeviceId);
+            requested = true;
+            return;
           }
           const state = getState();
           const handled = new Set([...state.handled, ...state.deleted]);

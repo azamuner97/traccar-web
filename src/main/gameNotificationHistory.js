@@ -19,7 +19,13 @@ export const gameNotificationHistoryKey = (origin, user, generation) =>
     ? JSON.stringify([origin, user.id, gameAlertSessionDeviceId(user), generation])
     : null;
 
-export const retainGameNotificationHistory = (items, user, generation, now = Date.now()) => {
+export const retainGameNotificationHistory = (
+  items,
+  user,
+  generation,
+  now = Date.now(),
+  personalSourceDeviceId,
+) => {
   const retained = new Map();
   for (const item of Array.isArray(items) ? items : []) {
     if (
@@ -27,7 +33,7 @@ export const retainGameNotificationHistory = (items, user, generation, now = Dat
       typeof item.read !== 'boolean' ||
       item.generation !== generation ||
       !isGameAlertInWindow(item, Infinity, now) ||
-      !canReceiveGameAlert(item, user) ||
+      !canReceiveGameAlert(item, user, personalSourceDeviceId) ||
       retained.has(item.id)
     )
       continue;

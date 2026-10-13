@@ -53,6 +53,7 @@ const tokenWrites = [];
 const serverKey = 'notificationAuditServer';
 let sessions = JSON.parse(window.sessionStorage.getItem(serverKey) || '{}');
 let failing = false;
+let trackerAccess = true;
 const getSession = (id) => {
   sessions[id] ||= { generation: window.crypto.randomUUID(), records: [] };
   return sessions[id];
@@ -75,12 +76,20 @@ window.fetch = async (url, options = {}) => {
     if (generation && generation !== session.generation) return new Response('{}', { status: 409 });
     const offset = Number(parsed.searchParams.get('after') || 0);
     const limit = Number(parsed.searchParams.get('limit') || 100);
-    const eligible = session.records.filter((item) => canReceiveGameAlert(item, serverUser));
+    const personalSourceDeviceId =
+      trackerAccess &&
+      ['player', 'supporter', 'hunter'].includes(serverUser.attributes.traccarToolUserRole)
+        ? (serverUser.attributes.traccarToolAssignedDeviceId ?? null)
+        : null;
+    const eligible = session.records.filter((item) =>
+      canReceiveGameAlert(item, serverUser, personalSourceDeviceId),
+    );
     const items = eligible.slice(offset, offset + limit);
     value = {
       version: 2,
       sessionDeviceId: deviceId,
       generation: session.generation,
+      personalSourceDeviceId,
       items,
       nextCursor: String(offset + items.length),
       hasMore: offset + items.length < eligible.length,
@@ -193,6 +202,10 @@ window.notificationAudit = {
   },
   setAssignedDevice(id) {
     updateUser({ traccarToolAssignedDeviceId: id });
+  },
+  setTrackerAccess(value) {
+    trackerAccess = value;
+    invalidate();
   },
   disableEvents(value) {
     updateUser({ 'ui.disableEvents': value });

@@ -6,6 +6,7 @@ import {
 } from '../store/gameNotifications.js';
 import { createGameNotificationSync, validateNotificationPage } from './gameNotificationSync.js';
 import { createGameNotificationCache } from './gameNotificationCache.js';
+import { canReceiveGameAlert } from './gameAlerts.js';
 
 const generation = '12345678-1234-1234-1234-123456789abc';
 const replacement = '87654321-1234-1234-1234-123456789abc';
@@ -36,6 +37,7 @@ const setup = (records = [], cache = createGameNotificationCache(() => null)) =>
   const presented = [];
   const calls = [];
   let failure;
+  let sourceAccess = true;
   const dispatch = (action) => {
     state = gameNotificationsReducer(state, action);
     if (state.key) cache.save(state.key, state);
@@ -61,16 +63,25 @@ const setup = (records = [], cache = createGameNotificationCache(() => null)) =>
         throw error;
       }
       const offset = Number(query.after || 0);
-      const items = records
+      const personalSourceDeviceId =
+        sourceAccess &&
+        ['player', 'supporter', 'hunter'].includes(currentUser.attributes.traccarToolUserRole)
+          ? currentUser.attributes.traccarToolAssignedDeviceId
+          : null;
+      const eligible = records.filter((entry) =>
+        canReceiveGameAlert(entry, currentUser, personalSourceDeviceId),
+      );
+      const items = eligible
         .slice(offset, offset + query.limit)
         .map((entry) => ({ ...entry, generation: activeGeneration }));
       return {
         version: 2,
         sessionDeviceId: 900,
         generation: activeGeneration,
+        personalSourceDeviceId,
         items,
         nextCursor: String(offset + items.length),
-        hasMore: offset + items.length < records.length,
+        hasMore: offset + items.length < eligible.length,
       };
     },
   };
@@ -85,6 +96,9 @@ const setup = (records = [], cache = createGameNotificationCache(() => null)) =>
     records,
     setUser: (value) => {
       currentUser = value;
+    },
+    setSourceAccess: (value) => {
+      sourceAccess = value;
     },
     fail: (value) => {
       failure = value;
@@ -168,6 +182,7 @@ test('permission changes cancel in-flight pages even when account and session st
     version: 2,
     sessionDeviceId: 900,
     generation,
+    personalSourceDeviceId: 100,
     items: [item('late')],
     nextCursor: '1',
     hasMore: false,
@@ -175,6 +190,80 @@ test('permission changes cancel in-flight pages even when account and session st
   await running;
   assert.equal(context.state().key, null);
   assert.equal(context.presented.length, 0);
+});
+
+test('tracker access revocation clears personal cache but preserves destination history and handled IDs', async () => {
+  const personal = item('personal', {
+    type: 'liveTrackingStarted',
+    audience: 'user',
+    recipientUserId: 5,
+    sourceDeviceId: 100,
+  });
+  const received = item('received', {
+    type: 'livePingReceived',
+    audience: 'livePlayer',
+    recipientUserId: 5,
+    sourceDeviceId: 200,
+  });
+  const context = setup([item('session'), personal, received]);
+  await context.sync.schedule();
+  assert.equal(context.state().personalSourceDeviceId, 100);
+  assert.equal(context.state().items.length, 3);
+  context.setSourceAccess(false);
+  await context.sync.schedule();
+  assert.equal(context.state().personalSourceDeviceId, null);
+  assert.deepEqual(
+    context
+      .state()
+      .items.map((entry) => entry.id)
+      .sort(),
+    ['received', 'session'],
+  );
+  assert.ok(context.state().handled.includes('personal'));
+  assert.equal(context.presented.length, 1);
+  context.setSourceAccess(true);
+  await context.sync.schedule();
+  assert.equal(context.state().items.length, 3);
+  assert.equal(context.presented.length, 1, 'restored access must not replay an alarm');
+});
+
+test('tracker access changes between metadata and a history page restart the authorized synchronization', async () => {
+  const context = setup([
+    item('private', {
+      type: 'liveTrackingStarted',
+      audience: 'user',
+      recipientUserId: 5,
+      sourceDeviceId: 100,
+    }),
+    item('received', {
+      type: 'livePingReceived',
+      audience: 'livePlayer',
+      recipientUserId: 5,
+      sourceDeviceId: 200,
+    }),
+  ]);
+  let revoked = false;
+  const sync = createGameNotificationSync({
+    ...context.options,
+    fetchPage: async (query) => {
+      if (query.generation && !revoked) {
+        context.setSourceAccess(false);
+        revoked = true;
+      }
+      return context.options.fetchPage(query);
+    },
+  });
+  await sync.schedule();
+  assert.equal(context.state().personalSourceDeviceId, null);
+  assert.deepEqual(
+    context.state().items.map((entry) => entry.id),
+    ['received'],
+  );
+  assert.deepEqual(
+    context.presented[0].alerts.map((entry) => entry.id),
+    ['received'],
+  );
+  assert.equal(context.state().error, null);
 });
 test('reload hydration never plays and deletion cannot be restored', async () => {
   const context = setup([item('one')]);
@@ -235,6 +324,7 @@ test('cancelled/account-changed responses cannot update state', async () => {
     version: 2,
     sessionDeviceId: 900,
     generation,
+    personalSourceDeviceId: null,
     items: [],
     nextCursor: '0',
     hasMore: false,
@@ -247,6 +337,7 @@ test('malformed API versions, stale scope and legacy types fail closed', () => {
     version: 2,
     sessionDeviceId: 900,
     generation,
+    personalSourceDeviceId: 100,
     items: [item('one')],
     nextCursor: '1',
     hasMore: false,
@@ -256,6 +347,8 @@ test('malformed API versions, stale scope and legacy types fail closed', () => {
     { version: 1 },
     { sessionDeviceId: 901 },
     { generation: 'invalid' },
+    { personalSourceDeviceId: undefined },
+    { personalSourceDeviceId: 101 },
     { items: [item('one', { audience: 'participants' })] },
     { nextCursor: '-1' },
     { nextCursor: '9223372036854775808' },
@@ -275,6 +368,7 @@ test('targeted pages accept this user and reject another recipient', () => {
     version: 2,
     sessionDeviceId: 900,
     generation,
+    personalSourceDeviceId: 100,
     items: [targeted],
     nextCursor: '1',
     hasMore: false,
@@ -283,12 +377,16 @@ test('targeted pages accept this user and reject another recipient', () => {
   assert.throws(() =>
     validateNotificationPage({ ...valid, items: [{ ...targeted, recipientUserId: 6 }] }, user, now),
   );
+  assert.throws(() =>
+    validateNotificationPage({ ...valid, personalSourceDeviceId: null }, user, now),
+  );
 });
 test('role-filtered history rejects named Speedhunt records for participants and anonymous variants for hunters and spectators', () => {
   const page = (audience) => ({
     version: 2,
     sessionDeviceId: 900,
     generation,
+    personalSourceDeviceId: null,
     items: [item('ping', { audience })],
     nextCursor: '1',
     hasMore: false,

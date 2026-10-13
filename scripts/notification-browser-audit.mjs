@@ -512,6 +512,55 @@ try {
     'reassignment back cannot replay handled personal alerts',
   );
   assert.ok(!(await historyIds()).includes(reassigned.id));
+  const permissionReceived = {
+    ...(await makeAlert('permission-received')),
+    type: 'livePingReceived',
+    audience: 'livePlayer',
+    recipientUserId: 5,
+    sourceDeviceId: 200,
+    message: '[12:00:00] Live ping from Bob is being received.',
+  };
+  const permissionPersonal = {
+    ...(await makeAlert('permission-personal')),
+    type: 'liveTrackingStarted',
+    audience: 'user',
+    recipientUserId: 5,
+    sourceDeviceId: 100,
+    message: '[12:00:00] Your private live ping started.',
+  };
+  await emit([permissionReceived]);
+  await banner.getByText(permissionReceived.message).waitFor();
+  expectedSounds += 1;
+  await emit([permissionPersonal]);
+  await banner.getByText(permissionPersonal.message).waitFor();
+  assert.equal(await soundCount(), ++expectedSounds);
+  await page.evaluate(() => window.notificationAudit.setTrackerAccess(false));
+  await page.waitForFunction(
+    () => window.notificationAudit.history.personalSourceDeviceId === null,
+  );
+  await synchronize();
+  await page.clock.fastForward(400);
+  assert.equal(
+    await banner.count(),
+    0,
+    'revoking tracker access removes the active private banner',
+  );
+  assert.ok(
+    (await historyIds()).includes(permissionReceived.id),
+    'destination history is not personal tracker history',
+  );
+  assert.ok(!(await historyIds()).includes(permissionPersonal.id));
+  await page.evaluate(() => window.notificationAudit.setTrackerAccess(true));
+  await page.waitForFunction(() =>
+    window.notificationAudit.history.items.some((item) => item.id === 'permission-personal'),
+  );
+  await synchronize();
+  assert.equal(
+    await banner.count(),
+    0,
+    'restoring access cannot revive a dismissed/unauthorized banner',
+  );
+  assert.equal(await soundCount(), expectedSounds, 'restoring access cannot replay handled sounds');
   const anonymousPing = {
     ...(await makeAlert('speedhunt-anonymous')),
     audience: 'nonHunters',

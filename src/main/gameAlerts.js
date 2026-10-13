@@ -47,7 +47,7 @@ const assignedDeviceId = (user) => {
 export const gameAlertPermissionKey = (user) =>
   JSON.stringify([user?.attributes?.traccarToolUserRole, assignedDeviceId(user)]);
 
-export const canReceiveGameAlert = (alert, user) =>
+export const canReceiveGameAlert = (alert, user, personalSourceDeviceId = assignedDeviceId(user)) =>
   Boolean(
     gameAlertSessionDeviceId(user) &&
     alert?.gameStateDeviceId === gameAlertSessionDeviceId(user) &&
@@ -59,7 +59,8 @@ export const canReceiveGameAlert = (alert, user) =>
       (alert.audience === 'user' &&
         targetedRoles.has(user?.attributes?.traccarToolUserRole) &&
         alert.recipientUserId === positiveId(user?.id) &&
-        alert.sourceDeviceId === assignedDeviceId(user)) ||
+        alert.sourceDeviceId === assignedDeviceId(user) &&
+        alert.sourceDeviceId === personalSourceDeviceId) ||
       (liveRecipientTypes.has(alert.type) &&
         alert.audience === liveRecipientAudiences.get(user?.attributes?.traccarToolUserRole) &&
         alert.recipientUserId === positiveId(user?.id) &&

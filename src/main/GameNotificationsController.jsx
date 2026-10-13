@@ -86,7 +86,18 @@ const GameNotificationsController = ({ playAlarm }) => {
 
   const head = queue.key === history.key ? queue.alerts[0] : null;
   const active =
-    canReceiveGameAlert(head, user) && head?.generation === history.generation ? head : null;
+    canReceiveGameAlert(head, user, history.personalSourceDeviceId) &&
+    head?.generation === history.generation
+      ? head
+      : null;
+  useEffect(() => {
+    setQueue((current) => ({
+      ...current,
+      alerts: current.alerts.filter((alert) =>
+        canReceiveGameAlert(alert, user, history.personalSourceDeviceId),
+      ),
+    }));
+  }, [user, history.personalSourceDeviceId]);
   useEffect(() => {
     if (active && !isFreshGameAlert(active)) {
       setQueue((current) => ({
