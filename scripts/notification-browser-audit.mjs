@@ -483,6 +483,121 @@ try {
   await synchronize();
   assert.equal(await soundCount(), expectedSounds);
   assert.ok(!(await historyIds()).includes(anotherUser.id));
+  const reassigned = {
+    ...(await makeAlert('private-reassigned')),
+    type: 'liveTrackingStarted',
+    audience: 'user',
+    recipientUserId: 5,
+    sourceDeviceId: 101,
+    message: '[12:00:00] Live ping started for your newly assigned tracker.',
+  };
+  await emit([reassigned]);
+  await synchronize();
+  assert.ok(!(await historyIds()).includes(reassigned.id));
+  assert.equal(await soundCount(), expectedSounds);
+  await page.evaluate(() => window.notificationAudit.setAssignedDevice(101));
+  await banner.getByText(reassigned.message).waitFor();
+  assert.equal(await soundCount(), ++expectedSounds);
+  assert.ok(!(await historyIds()).includes('personal-liveTrackingStarted'));
+  await page.evaluate(() => window.notificationAudit.setAssignedDevice(100));
+  await page.waitForFunction(() =>
+    window.notificationAudit.history.items.some(
+      (item) => item.id === 'personal-liveTrackingStarted',
+    ),
+  );
+  await synchronize();
+  assert.equal(
+    await soundCount(),
+    expectedSounds,
+    'reassignment back cannot replay handled personal alerts',
+  );
+  assert.ok(!(await historyIds()).includes(reassigned.id));
+  const anonymousPing = {
+    ...(await makeAlert('speedhunt-anonymous')),
+    audience: 'nonHunters',
+    message: '[12:00:00] Speedhunt: Ping 2 out of 4 sent.',
+  };
+  const hunterPing = {
+    ...anonymousPing,
+    id: 'speedhunt-hunters',
+    audience: 'hunters',
+    message: anonymousPing.message + ' Participant: Älice.',
+  };
+  for (const role of ['player', 'supporter', 'hunter', 'spectator']) {
+    await page.evaluate(
+      ({ role, records }) => {
+        window.notificationAudit.setRole(role);
+        window.notificationAudit.reset(900, records);
+      },
+      { role, records: [anonymousPing, hunterPing] },
+    );
+    const named = ['hunter', 'spectator'].includes(role);
+    const expected = named ? hunterPing : anonymousPing;
+    await banner.getByText(expected.message).waitFor();
+    await waitForHistory(1);
+    assert.deepEqual(await historyIds(), [expected.id]);
+    assert.equal(await soundCount(), ++expectedSounds, 'one banner and alarm per Speedhunt');
+    const messages = await page.evaluate(() =>
+      window.notificationAudit.history.items.map((item) => item.message),
+    );
+    assert.equal(
+      messages.some((message) => message.includes('Älice')),
+      named,
+    );
+    await dismiss();
+    await synchronize();
+    assert.equal(await soundCount(), expectedSounds, 'role-scoped history reconnect cannot replay');
+  }
+  assert.deepEqual(errors, []);
+  const liveAudiences = {
+    player: 'livePlayer',
+    supporter: 'liveSupporter',
+    hunter: 'liveHunter',
+    spectator: 'liveSpectator',
+  };
+  for (const [role, audience] of Object.entries(liveAudiences)) {
+    const received = {
+      ...(await makeAlert('recipient-' + role)),
+      type: 'livePingReceived',
+      audience,
+      recipientUserId: 5,
+      sourceDeviceId: 200,
+      message:
+        '[12:00:00] Live ping from Älice is now being sent to Tschugger. Reason: Usage of public transport.',
+    };
+    await page.evaluate(
+      ({ role, records }) => {
+        window.notificationAudit.setRole(role);
+        window.notificationAudit.reset(900, records);
+      },
+      { role, records: [received, { ...received, id: 'other-recipient', recipientUserId: 6 }] },
+    );
+    await banner.getByText(received.message).waitFor();
+    await waitForHistory(1);
+    assert.deepEqual(await historyIds(), [received.id]);
+    assert.equal(await soundCount(), ++expectedSounds);
+    await dismiss();
+    await synchronize();
+    assert.equal(await soundCount(), expectedSounds);
+    await page.evaluate(() => window.notificationAudit.flushHistory());
+    await page.reload();
+    await page.waitForFunction(() => window.notificationAudit?.sockets > 0);
+    await waitForHistory(1);
+    assert.equal(await soundCount(), 0, 'recipient cache hydration cannot replay sound');
+    expectedSounds = 0;
+    const stopped = {
+      ...received,
+      id: 'recipient-stop-' + role,
+      type: 'livePingEnded',
+      message:
+        '[12:01:00] Live ping from Älice to Tschugger has stopped. Timer expired. Reason: Usage of public transport.',
+    };
+    await emit([stopped]);
+    await banner.getByText(stopped.message).waitFor();
+    await waitForHistory(2);
+    assert.equal(await soundCount(), ++expectedSounds);
+    await dismiss();
+  }
   assert.deepEqual(errors, []);
   console.log(
     `${mobileManager ? 'Mobile Manager bridge' : 'Desktop'} database notification audit passed: API recovery, IndexedDB, >100/>24h history, paged drawer, deletion, reset, unread, timeout, replacement, permissions and sound.`,

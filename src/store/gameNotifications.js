@@ -4,6 +4,7 @@ import { retainGameNotificationHistory } from '../main/gameNotificationHistory.j
 export const emptyGameNotificationState = () => ({
   key: null,
   generation: null,
+  permission: null,
   items: [],
   handled: [],
   deleted: [],
@@ -19,8 +20,14 @@ const { reducer, actions } = createSlice({
   initialState: emptyGameNotificationState(),
   reducers: {
     deactivate: () => emptyGameNotificationState(),
-    activate(_state, { payload }) {
-      return { ...emptyGameNotificationState(), ...payload, drawerVisible: false };
+    activate(state, { payload }) {
+      const drawerVisible = state.key === payload.key && state.drawerVisible;
+      return {
+        ...emptyGameNotificationState(),
+        ...payload,
+        drawerVisible,
+        items: (payload.items || []).map((item) => ({ ...item, read: drawerVisible || item.read })),
+      };
     },
     status(state, { payload }) {
       state.loading = payload.loading;

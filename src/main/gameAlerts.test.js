@@ -56,6 +56,72 @@ test('schema rejects legacy audiences, unknown types, invalid fields and timezon
     assert.equal(isValidGameAlert(alert(changes)), false);
   }
 });
+test('named Speedhunt variants reach hunters and spectators while players and supporters receive the anonymous variant', () => {
+  for (const audience of ['hunters', 'nonHunters']) {
+    const value = alert({ audience });
+    assert.ok(isValidGameAlert(value));
+    for (const role of ['player', 'supporter', 'hunter', 'spectator'])
+      assert.equal(
+        canReceiveGameAlert(value, user(role)),
+        ['hunter', 'spectator'].includes(role) === (audience === 'hunters'),
+      );
+    assert.equal(canReceiveGameAlert(value, user('unknown')), false);
+    assert.equal(canReceiveGameAlert(value, user('hunter', 901)), false);
+    assert.equal(canReceiveGameAlert(value, { ...user('hunter'), administrator: true }), false);
+    assert.equal(isValidGameAlert(alert({ audience, type: 'playerCaught' })), false);
+    assert.equal(
+      isValidGameAlert(alert({ audience, recipientUserId: 5, sourceDeviceId: 100 })),
+      false,
+    );
+  }
+});
+test('live recipient records require matching account role and session but not source assignment', () => {
+  const audiences = {
+    hunter: 'liveHunter',
+    player: 'livePlayer',
+    supporter: 'liveSupporter',
+    spectator: 'liveSpectator',
+  };
+  for (const [role, audience] of Object.entries(audiences)) {
+    for (const type of ['livePingReceived', 'livePingEnded']) {
+      const value = alert({ type, audience, recipientUserId: 5, sourceDeviceId: 200 });
+      assert.ok(isValidGameAlert(value));
+      assert.ok(canReceiveGameAlert(value, user(role)));
+      for (const other of Object.keys(audiences))
+        assert.equal(canReceiveGameAlert(value, user(other)), other === role);
+      assert.equal(canReceiveGameAlert(value, { ...user(role), id: 6 }), false);
+      assert.equal(canReceiveGameAlert(value, user(role, 901)), false);
+      assert.equal(canReceiveGameAlert(value, { ...user(role), administrator: true }), false);
+      assert.equal(isValidGameAlert({ ...value, recipientUserId: undefined }), false);
+      assert.equal(isValidGameAlert({ ...value, sourceDeviceId: undefined }), false);
+      assert.equal(isValidGameAlert({ ...value, audience: 'user' }), false);
+      assert.equal(isValidGameAlert({ ...value, audience: 'session' }), false);
+    }
+    assert.equal(
+      isValidGameAlert(
+        alert({
+          type: 'livePingTargetsChanged',
+          audience,
+          recipientUserId: 5,
+          sourceDeviceId: 200,
+        }),
+      ),
+      role === 'spectator',
+    );
+  }
+  assert.equal(
+    canReceiveGameAlert(
+      alert({
+        type: 'livePingReceived',
+        audience: 'livePlayer',
+        recipientUserId: 5,
+        sourceDeviceId: 100,
+      }),
+      user('player'),
+    ),
+    true,
+  );
+});
 test('targeted geofence exits reach only the assigned account', () => {
   const targeted = alert({
     type: 'geofenceExit',

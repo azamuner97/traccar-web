@@ -83,6 +83,32 @@ test('cache scope includes origin, user, device and generation', () => {
     null,
   );
 });
+test('recipient history persists source and account fields and revalidates the current destination role', () => {
+  const received = alert({
+    type: 'livePingReceived',
+    audience: 'liveHunter',
+    recipientUserId: 5,
+    sourceDeviceId: 200,
+  });
+  const items = retainGameNotificationHistory([received], user, generation, now);
+  assert.deepEqual(items, [received]);
+  assert.equal(
+    retainGameNotificationHistory(
+      items,
+      {
+        ...user,
+        attributes: {
+          ...user.attributes,
+          traccarToolUserRole: 'player',
+        },
+      },
+      generation,
+      now,
+    ).length,
+    0,
+  );
+  assert.equal(retainGameNotificationHistory(items, { ...user, id: 6 }, generation, now).length, 0);
+});
 test('date formatting respects midnight and DST and keeps native events navigable', () => {
   assert.equal(
     formatGameNotificationTime(alert({ occurredAt: '2026-10-10T22:05:06Z' })),

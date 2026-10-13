@@ -29,6 +29,7 @@ export const createGameNotificationsMiddleware =
       if (account && history.key)
         cache.save(history.key, {
           generation: history.generation,
+          permission: history.permission,
           items: history.items,
           handled: history.handled,
           deleted: history.deleted,

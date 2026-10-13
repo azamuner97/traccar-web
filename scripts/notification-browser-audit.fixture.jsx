@@ -11,7 +11,7 @@ import { LocalizationProvider } from '../src/common/components/LocalizationProvi
 import dimensions from '../src/common/theme/dimensions';
 import EventsDrawer from '../src/main/EventsDrawer';
 import MapNotification from '../src/map/control/MapNotification';
-import { gameAlertSessionDeviceId } from '../src/main/gameAlerts';
+import { canReceiveGameAlert, gameAlertSessionDeviceId } from '../src/main/gameAlerts';
 import { gameNotificationCache } from '../src/main/gameNotificationCache';
 
 const sockets = [];
@@ -47,6 +47,8 @@ let serverUser = {
     language: 'en',
   },
 };
+const userKey = 'notificationAuditUser';
+serverUser = JSON.parse(window.sessionStorage.getItem(userKey) || 'null') || serverUser;
 const tokenWrites = [];
 const serverKey = 'notificationAuditServer';
 let sessions = JSON.parse(window.sessionStorage.getItem(serverKey) || '{}');
@@ -73,9 +75,7 @@ window.fetch = async (url, options = {}) => {
     if (generation && generation !== session.generation) return new Response('{}', { status: 409 });
     const offset = Number(parsed.searchParams.get('after') || 0);
     const limit = Number(parsed.searchParams.get('limit') || 100);
-    const eligible = session.records.filter(
-      (item) => item.audience === 'session' || item.recipientUserId === serverUser.id,
-    );
+    const eligible = session.records.filter((item) => canReceiveGameAlert(item, serverUser));
     const items = eligible.slice(offset, offset + limit);
     value = {
       version: 2,
@@ -89,6 +89,7 @@ window.fetch = async (url, options = {}) => {
   if (parsed.pathname === '/api/session') value = serverUser;
   if (parsed.pathname === '/api/users/5' && options.method === 'PUT') {
     serverUser = JSON.parse(options.body);
+    window.sessionStorage.setItem(userKey, JSON.stringify(serverUser));
     tokenWrites.push(serverUser.attributes.notificationTokens);
     value = serverUser;
   }
@@ -155,6 +156,7 @@ createRoot(document.getElementById('root')).render(
 
 const updateUser = (changes) => {
   serverUser = { ...serverUser, attributes: { ...serverUser.attributes, ...changes } };
+  window.sessionStorage.setItem(userKey, JSON.stringify(serverUser));
   store.dispatch(sessionActions.updateUser(serverUser));
 };
 window.notificationAudit = {
@@ -188,6 +190,9 @@ window.notificationAudit = {
   },
   setRole(role) {
     updateUser({ traccarToolUserRole: role });
+  },
+  setAssignedDevice(id) {
+    updateUser({ traccarToolAssignedDeviceId: id });
   },
   disableEvents(value) {
     updateUser({ 'ui.disableEvents': value });

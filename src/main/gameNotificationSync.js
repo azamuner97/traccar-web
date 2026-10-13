@@ -1,5 +1,6 @@
 import {
   canReceiveGameAlert,
+  gameAlertPermissionKey,
   gameAlertSessionDeviceId,
   isFreshGameAlert,
   isGameAlertInWindow,
@@ -70,6 +71,7 @@ export const createGameNotificationSync = ({
   now = Date.now,
 }) => {
   const account = gameNotificationAccountKey(origin, getUser());
+  const permission = gameAlertPermissionKey(getUser());
   let running = false;
   let requested = false;
   let cancelled = false;
@@ -78,11 +80,14 @@ export const createGameNotificationSync = ({
   let pendingKey;
   const pending = new Map();
   const current = () =>
-    !cancelled && account && account === gameNotificationAccountKey(origin, getUser());
+    !cancelled &&
+    account &&
+    account === gameNotificationAccountKey(origin, getUser()) &&
+    permission === gameAlertPermissionKey(getUser());
 
   const hydrate = async (generation, discardPrevious = false) => {
     const key = gameNotificationHistoryKey(origin, getUser(), generation);
-    if (getState().key === key) return;
+    if (getState().key === key && getState().permission === permission) return;
     const cached = await cache.load(key);
     if (!current()) return;
     const retained = retainGameNotificationHistory(cached?.items, getUser(), generation, now());
@@ -96,6 +101,7 @@ export const createGameNotificationSync = ({
     );
     const validSnapshot =
       cached?.generation === generation &&
+      cached?.permission === permission &&
       Array.isArray(cached.items) &&
       retained.length === cached.items.length &&
       Array.isArray(cached.handled) &&
@@ -105,6 +111,7 @@ export const createGameNotificationSync = ({
     activate({
       key,
       generation,
+      permission,
       items,
       handled: ids([...ids(cached?.handled), ...retained.map((item) => item.id)]),
       deleted,

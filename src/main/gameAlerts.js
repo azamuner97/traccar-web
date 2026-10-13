@@ -1,5 +1,7 @@
 const generatedRoles = new Set(['player', 'supporter', 'hunter', 'spectator']);
 const targetedRoles = new Set(['player', 'supporter', 'hunter']);
+// The stable 'hunters' audience also includes spectators.
+const namedSpeedhuntRoles = new Set(['hunter', 'spectator']);
 const sessionAlertTypes = new Set(['speedhunt', 'playerCaught', 'notificationTest']);
 const targetedAlertTypes = new Set([
   'geofenceExit',
@@ -7,6 +9,15 @@ const targetedAlertTypes = new Set([
   'liveTrackingStopped',
   'liveTrackingTargetsChanged',
 ]);
+const liveRecipientTypes = new Set(['livePingReceived', 'livePingEnded', 'livePingTargetsChanged']);
+const liveRecipientAudiences = new Map([
+  ['hunter', 'liveHunter'],
+  ['player', 'livePlayer'],
+  ['supporter', 'liveSupporter'],
+  ['spectator', 'liveSpectator'],
+]);
+export const isLiveRecipientAudience = (audience) =>
+  [...liveRecipientAudiences.values()].includes(audience);
 const alertMaxAgeMs = 15 * 60 * 1000;
 export const gameAlertDurationMs = 60000;
 
@@ -33,15 +44,26 @@ const assignedDeviceId = (user) => {
   return positiveId(Number(value));
 };
 
+export const gameAlertPermissionKey = (user) =>
+  JSON.stringify([user?.attributes?.traccarToolUserRole, assignedDeviceId(user)]);
+
 export const canReceiveGameAlert = (alert, user) =>
   Boolean(
     gameAlertSessionDeviceId(user) &&
     alert?.gameStateDeviceId === gameAlertSessionDeviceId(user) &&
     (alert.audience === 'session' ||
+      (alert.type === 'speedhunt' &&
+        (alert.audience === 'hunters' || alert.audience === 'nonHunters') &&
+        (alert.audience === 'hunters') ===
+          namedSpeedhuntRoles.has(user?.attributes?.traccarToolUserRole)) ||
       (alert.audience === 'user' &&
         targetedRoles.has(user?.attributes?.traccarToolUserRole) &&
         alert.recipientUserId === positiveId(user?.id) &&
-        alert.sourceDeviceId === assignedDeviceId(user))),
+        alert.sourceDeviceId === assignedDeviceId(user)) ||
+      (liveRecipientTypes.has(alert.type) &&
+        alert.audience === liveRecipientAudiences.get(user?.attributes?.traccarToolUserRole) &&
+        alert.recipientUserId === positiveId(user?.id) &&
+        positiveId(alert.sourceDeviceId) !== null)),
   );
 
 export const isGameAlertInWindow = (alert, maxAgeMs, now = Date.now()) => {
@@ -87,7 +109,18 @@ export const isValidGameAlert = (alert) => {
     targetedAlertTypes.has(alert.type) &&
     positiveId(alert.recipientUserId) !== null &&
     positiveId(alert.sourceDeviceId) !== null;
-  if (!session && !targeted) return false;
+  const role =
+    alert.type === 'speedhunt' &&
+    ['hunters', 'nonHunters'].includes(alert.audience) &&
+    !Object.hasOwn(alert, 'recipientUserId') &&
+    !Object.hasOwn(alert, 'sourceDeviceId');
+  const liveRecipient =
+    liveRecipientTypes.has(alert.type) &&
+    isLiveRecipientAudience(alert.audience) &&
+    positiveId(alert.recipientUserId) !== null &&
+    positiveId(alert.sourceDeviceId) !== null &&
+    (alert.type !== 'livePingTargetsChanged' || alert.audience === 'liveSpectator');
+  if (!session && !targeted && !role && !liveRecipient) return false;
   try {
     new Intl.DateTimeFormat('en-GB', { timeZone: alert.timeZone });
     return true;

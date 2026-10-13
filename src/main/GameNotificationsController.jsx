@@ -9,6 +9,7 @@ import { gameNotificationAccountKey } from './gameNotificationHistory';
 import { createGameNotificationSync, listenGameNotificationSync } from './gameNotificationSync';
 import {
   canReceiveGameAlert,
+  gameAlertPermissionKey,
   closeGameAlertQueue,
   gameAlertDurationMs,
   isFreshGameAlert,
@@ -22,6 +23,7 @@ const GameNotificationsController = ({ playAlarm }) => {
   const user = useSelector((state) => state.session.user);
   const history = useSelector((state) => state.gameNotifications);
   const account = gameNotificationAccountKey(window.location.origin, user);
+  const permission = gameAlertPermissionKey(user);
   const [queue, setQueue] = useState({ key: null, alerts: [] });
   const [visible, setVisible] = useState(document.visibilityState === 'visible');
   const playedRef = useRef(null);
@@ -63,7 +65,7 @@ const GameNotificationsController = ({ playAlarm }) => {
       document.removeEventListener('visibilitychange', foreground);
       window.removeEventListener('online', sync.schedule);
     };
-  }, [account, dispatch, store, t]);
+  }, [account, permission, dispatch, store, t]);
 
   useEffect(() => {
     setQueue((current) => (current.key === history.key ? current : { key: null, alerts: [] }));

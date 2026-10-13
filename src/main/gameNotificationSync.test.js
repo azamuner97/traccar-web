@@ -111,6 +111,71 @@ test('full-session pages recover old history silently and fresh records once', a
   assert.equal(context.presented.length, 1);
   assert.equal(context.state().cursor, '251');
 });
+
+test('tracker reassignment reloads the authorized stream without replaying handled session records', async () => {
+  const personal = (id, sourceDeviceId) =>
+    item(id, {
+      type: 'liveTrackingStarted',
+      audience: 'user',
+      recipientUserId: user.id,
+      sourceDeviceId,
+    });
+  const context = setup([item('session'), personal('old', 100)]);
+  await context.sync.schedule();
+  context.cache.save(`active:${JSON.stringify(['https://one.test', 5, 900])}`, { generation });
+  context.setUser({
+    ...user,
+    attributes: { ...user.attributes, traccarToolAssignedDeviceId: 101 },
+  });
+  context.records.splice(0, 2, item('session'), personal('new', 101));
+  context.dispatch(actions.setDrawerVisible({ key: context.state().key, visible: true }));
+  const changed = createGameNotificationSync(context.options);
+  await changed.schedule();
+  assert.deepEqual(
+    context
+      .state()
+      .items.map((entry) => entry.id)
+      .sort(),
+    ['new', 'session'],
+  );
+  assert.equal(context.state().cursor, '2');
+  assert.equal(context.presented.length, 2);
+  assert.deepEqual(
+    context.presented[1].alerts.map((entry) => entry.id),
+    ['new'],
+  );
+  assert.equal(context.state().drawerVisible, true);
+  assert.ok(context.state().items.every((entry) => entry.read));
+});
+
+test('permission changes cancel in-flight pages even when account and session stay unchanged', async () => {
+  const context = setup();
+  let release;
+  const changed = createGameNotificationSync({
+    ...context.options,
+    fetchPage: () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  });
+  const running = changed.schedule();
+  while (!release) await new Promise((resolve) => setTimeout(resolve, 0));
+  context.setUser({
+    ...user,
+    attributes: { ...user.attributes, traccarToolUserRole: 'spectator' },
+  });
+  release({
+    version: 2,
+    sessionDeviceId: 900,
+    generation,
+    items: [item('late')],
+    nextCursor: '1',
+    hasMore: false,
+  });
+  await running;
+  assert.equal(context.state().key, null);
+  assert.equal(context.presented.length, 0);
+});
 test('reload hydration never plays and deletion cannot be restored', async () => {
   const context = setup([item('one')]);
   await context.sync.schedule();
@@ -218,6 +283,26 @@ test('targeted pages accept this user and reject another recipient', () => {
   assert.throws(() =>
     validateNotificationPage({ ...valid, items: [{ ...targeted, recipientUserId: 6 }] }, user, now),
   );
+});
+test('role-filtered history rejects named Speedhunt records for participants and anonymous variants for hunters and spectators', () => {
+  const page = (audience) => ({
+    version: 2,
+    sessionDeviceId: 900,
+    generation,
+    items: [item('ping', { audience })],
+    nextCursor: '1',
+    hasMore: false,
+  });
+  for (const role of ['player', 'supporter', 'hunter', 'spectator']) {
+    const viewer = { ...user, attributes: { ...user.attributes, traccarToolUserRole: role } };
+    const named = ['hunter', 'spectator'].includes(role);
+    assert.doesNotThrow(() =>
+      validateNotificationPage(page(named ? 'hunters' : 'nonHunters'), viewer, now),
+    );
+    assert.throws(() =>
+      validateNotificationPage(page(named ? 'nonHunters' : 'hunters'), viewer, now),
+    );
+  }
 });
 
 test('interrupted pages resume at the processed cursor and present only after completion', async () => {
