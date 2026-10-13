@@ -1,6 +1,12 @@
 const generatedRoles = new Set(['player', 'supporter', 'hunter', 'spectator']);
 const targetedRoles = new Set(['player', 'supporter', 'hunter']);
 const sessionAlertTypes = new Set(['speedhunt', 'playerCaught', 'notificationTest']);
+const targetedAlertTypes = new Set([
+  'geofenceExit',
+  'liveTrackingStarted',
+  'liveTrackingStopped',
+  'liveTrackingTargetsChanged',
+]);
 const alertMaxAgeMs = 15 * 60 * 1000;
 export const gameAlertDurationMs = 60000;
 
@@ -78,7 +84,7 @@ export const isValidGameAlert = (alert) => {
     !Object.hasOwn(alert, 'sourceDeviceId');
   const targeted =
     alert.audience === 'user' &&
-    alert.type === 'geofenceExit' &&
+    targetedAlertTypes.has(alert.type) &&
     positiveId(alert.recipientUserId) !== null &&
     positiveId(alert.sourceDeviceId) !== null;
   if (!session && !targeted) return false;

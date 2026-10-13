@@ -42,6 +42,7 @@ let serverUser = {
   attributes: {
     traccarToolUserRole: 'player',
     traccarToolSessionDeviceId: 900,
+    traccarToolAssignedDeviceId: 100,
     notificationTokens: 'one,two,three',
     language: 'en',
   },
@@ -72,14 +73,17 @@ window.fetch = async (url, options = {}) => {
     if (generation && generation !== session.generation) return new Response('{}', { status: 409 });
     const offset = Number(parsed.searchParams.get('after') || 0);
     const limit = Number(parsed.searchParams.get('limit') || 100);
-    const items = session.records.slice(offset, offset + limit);
+    const eligible = session.records.filter(
+      (item) => item.audience === 'session' || item.recipientUserId === serverUser.id,
+    );
+    const items = eligible.slice(offset, offset + limit);
     value = {
-      version: 1,
+      version: 2,
       sessionDeviceId: deviceId,
       generation: session.generation,
       items,
       nextCursor: String(offset + items.length),
-      hasMore: offset + items.length < session.records.length,
+      hasMore: offset + items.length < eligible.length,
     };
   }
   if (parsed.pathname === '/api/session') value = serverUser;

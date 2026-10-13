@@ -94,6 +94,16 @@ test('targeted geofence exits reach only the assigned account', () => {
     assert.equal(isValidGameAlert(alert(invalid)), false);
   }
 });
+test('live tracking types use the same strict assigned-user audience', () => {
+  for (const type of ['liveTrackingStarted', 'liveTrackingStopped', 'liveTrackingTargetsChanged']) {
+    const targeted = alert({ type, audience: 'user', recipientUserId: 5, sourceDeviceId: 100 });
+    assert.ok(isValidGameAlert(targeted));
+    assert.ok(canReceiveGameAlert(targeted, user('player')));
+    assert.equal(canReceiveGameAlert(targeted, { ...user('player'), id: 6 }), false);
+    assert.equal(isValidGameAlert(alert({ type })), false);
+    assert.equal(isValidGameAlert({ ...targeted, sourceDeviceId: 0 }), false);
+  }
+});
 test('invalid session identifiers fail closed', () => {
   for (const id of [
     null,

@@ -455,6 +455,34 @@ try {
   assert.equal(await denied.evaluate(() => window.notificationAudit.history.items.length), 1);
   await denied.getByRole('button', { name: 'Dismiss notification' }).click();
   await denied.close();
+  // Personal live alerts use the real banner/history controller and account filtering.
+  let expectedSounds = await soundCount();
+  for (const type of ['liveTrackingStarted', 'liveTrackingTargetsChanged', 'liveTrackingStopped']) {
+    const personal = {
+      ...(await makeAlert(`personal-${type}`)),
+      type,
+      audience: 'user',
+      recipientUserId: 5,
+      sourceDeviceId: 100,
+      message: `[12:00:00] ${type}: Anarchist:in. Reason: Usage of public transport.`,
+    };
+    await emit([personal]);
+    await banner.getByText(personal.message).waitFor();
+    expectedSounds += 1;
+    assert.equal(await soundCount(), expectedSounds);
+    assert.ok((await historyIds()).includes(personal.id));
+  }
+  const anotherUser = {
+    ...(await makeAlert('private-other')),
+    type: 'liveTrackingStarted',
+    audience: 'user',
+    recipientUserId: 6,
+    sourceDeviceId: 101,
+  };
+  await emit([anotherUser]);
+  await synchronize();
+  assert.equal(await soundCount(), expectedSounds);
+  assert.ok(!(await historyIds()).includes(anotherUser.id));
   assert.deepEqual(errors, []);
   console.log(
     `${mobileManager ? 'Mobile Manager bridge' : 'Desktop'} database notification audit passed: API recovery, IndexedDB, >100/>24h history, paged drawer, deletion, reset, unread, timeout, replacement, permissions and sound.`,
