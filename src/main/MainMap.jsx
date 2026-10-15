@@ -20,6 +20,7 @@ import MapRuler from '../map/control/MapRuler';
 import MapNotification from '../map/control/MapNotification';
 import useFeatures from '../common/util/useFeatures';
 import MapDrawing from '../map/draw/MapDrawing';
+import MapParticipantProximity from '../map/main/MapParticipantProximity';
 import { gameAlertSessionDeviceId } from './gameAlerts';
 
 const MainMap = ({ filteredPositions, selectedPosition, onEventsClick }) => {
@@ -50,6 +51,7 @@ const MainMap = ({ filteredPositions, selectedPosition, onEventsClick }) => {
       <MapView>
         <MapOverlay />
         <MapGeofence />
+        <MapParticipantProximity />
         <MapAccuracy positions={filteredPositions} />
         <MapLiveRoutes deviceIds={filteredPositions.map((p) => p.deviceId)} />
         <MapPositionMarkers

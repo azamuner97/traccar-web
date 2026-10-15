@@ -22,6 +22,8 @@ import {
 import fetchOrThrow from './common/util/fetchOrThrow';
 import createRefreshScheduler from './common/util/refreshScheduler';
 import GameNotificationsController from './main/GameNotificationsController';
+import GameProximityController from './main/GameProximityController';
+import { requestProximitySync } from './main/gameProximity';
 import { requestGameNotificationSync } from './main/gameNotificationSync';
 
 const logoutCode = 4000;
@@ -152,6 +154,7 @@ const SocketController = () => {
       if (!isCurrent()) return;
       dispatch(sessionActions.updateSocket(true));
       requestGameNotificationSync();
+      requestProximitySync();
       socket.send(JSON.stringify({ logs: includeLogsRef.current }));
       geofenceRefreshScheduler.schedule();
       drawingRefreshScheduler.schedule();
@@ -222,6 +225,14 @@ const SocketController = () => {
       }
       if (Array.isArray(data.invalidate) && data.invalidate.includes('game-notifications')) {
         requestGameNotificationSync();
+      }
+      if (
+        Array.isArray(data.invalidate) &&
+        data.invalidate.some((resource) =>
+          ['game-proximity', 'devices', 'positions'].includes(resource),
+        )
+      ) {
+        requestProximitySync();
       }
       if (Array.isArray(data.invalidate) && data.invalidate.includes('user')) {
         userRefreshScheduler.schedule();
@@ -346,6 +357,7 @@ const SocketController = () => {
         />
       ))}
       <GameNotificationsController playAlarm={playAlarm} />
+      <GameProximityController />
     </>
   );
 };

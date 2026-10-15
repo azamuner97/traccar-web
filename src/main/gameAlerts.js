@@ -4,6 +4,8 @@ const targetedRoles = new Set(['player', 'supporter', 'hunter']);
 const namedSpeedhuntRoles = new Set(['hunter', 'spectator']);
 const sessionAlertTypes = new Set(['speedhunt', 'playerCaught', 'notificationTest']);
 const targetedAlertTypes = new Set([
+  'participantProximityEnter',
+  'participantProximityExit',
   'geofenceExit',
   'liveTrackingStarted',
   'liveTrackingStopped',
@@ -52,7 +54,7 @@ export const canReceiveGameAlert = (alert, user, personalSourceDeviceId = assign
     gameAlertSessionDeviceId(user) &&
     alert?.gameStateDeviceId === gameAlertSessionDeviceId(user) &&
     (alert.audience === 'session' ||
-      (alert.type === 'speedhunt' &&
+      (['speedhunt', 'participantProximityConsequence'].includes(alert.type) &&
         (alert.audience === 'hunters' || alert.audience === 'nonHunters') &&
         (alert.audience === 'hunters') ===
           namedSpeedhuntRoles.has(user?.attributes?.traccarToolUserRole)) ||
@@ -111,8 +113,9 @@ export const isValidGameAlert = (alert) => {
     positiveId(alert.recipientUserId) !== null &&
     positiveId(alert.sourceDeviceId) !== null;
   const role =
-    alert.type === 'speedhunt' &&
+    ['speedhunt', 'participantProximityConsequence'].includes(alert.type) &&
     ['hunters', 'nonHunters'].includes(alert.audience) &&
+    (alert.type !== 'participantProximityConsequence' || alert.audience === 'hunters') &&
     !Object.hasOwn(alert, 'recipientUserId') &&
     !Object.hasOwn(alert, 'sourceDeviceId');
   const liveRecipient =

@@ -20,6 +20,22 @@ const { reducer, actions } = createSlice({
     liveFilterMap: false,
   },
   reducers: {
+    removeDeviceData(state, action) {
+      delete state.positions[action.payload];
+      delete state.history[action.payload];
+    },
+    pruneDeviceAccess(state, action) {
+      const allowed = new Set(action.payload);
+      for (const deviceId of new Set([
+        ...Object.keys(state.positions),
+        ...Object.keys(state.history),
+      ])) {
+        if (!allowed.has(Number(deviceId))) {
+          delete state.positions[deviceId];
+          delete state.history[deviceId];
+        }
+      }
+    },
     updateServer(state, action) {
       state.server = action.payload;
     },
