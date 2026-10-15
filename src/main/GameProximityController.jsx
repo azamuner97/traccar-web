@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
+import { useDispatch, useSelector, useStore } from 'react-redux';
 import { devicesActions, errorsActions, gameProximityActions, sessionActions } from '../store';
 import createRefreshScheduler from '../common/util/refreshScheduler';
 import { gameAlertSessionDeviceId } from './gameAlerts';
@@ -11,6 +11,7 @@ import {
 
 const GameProximityController = () => {
   const dispatch = useDispatch();
+  const store = useStore();
   const user = useSelector((state) => state.session.user);
   const socket = useSelector((state) => state.session.socket);
   const selectedId = useSelector((state) => state.devices.selectedId);
@@ -99,26 +100,37 @@ const GameProximityController = () => {
     const unsubscribe = subscribeProximitySync(scheduler.schedule);
     scheduler.schedule();
     const interval = setInterval(scheduler.schedule, socket ? 30000 : 5000);
-    const expiryInterval = setInterval(() => {
+    let purging = false;
+    const purgeExpiredAccess = () => {
+      if (purging) return;
       const expired = access.filter((grant) => Date.parse(grant.expiresAt) <= Date.now());
-      if (expired.length) {
-        access = access.filter((grant) => Date.parse(grant.expiresAt) > Date.now());
-        accessRef.current.grants = access;
+      if (!expired.length) return;
+      // Retain known deadlines until an authoritative refresh replaces them.
+      // In-flight socket packets must not resurrect an expired peer marker.
+      purging = true;
+      try {
         for (const grant of expired) {
-          dispatch(devicesActions.remove(grant.deviceId));
-          dispatch(sessionActions.removeDeviceData(grant.deviceId));
-          if (selectedRef.current === grant.deviceId) dispatch(devicesActions.selectId(null));
+          const state = store.getState();
+          if (state.devices.items[grant.deviceId]) dispatch(devicesActions.remove(grant.deviceId));
+          if (state.session.positions[grant.deviceId] || state.session.history[grant.deviceId])
+            dispatch(sessionActions.removeDeviceData(grant.deviceId));
+          if (state.devices.selectedId === grant.deviceId) dispatch(devicesActions.selectId(null));
         }
+      } finally {
+        purging = false;
       }
-    }, 1000);
+    };
+    const unsubscribeStore = store.subscribe(purgeExpiredAccess);
+    const expiryInterval = setInterval(purgeExpiredAccess, 1000);
     return () => {
       controller.abort();
       scheduler.cancel();
       clearInterval(interval);
       clearInterval(expiryInterval);
+      unsubscribeStore();
       unsubscribe();
     };
-  }, [dispatch, user?.id, role, sessionDeviceId, userSessionId, assignedDeviceId, socket]);
+  }, [dispatch, store, user?.id, role, sessionDeviceId, userSessionId, assignedDeviceId, socket]);
   return null;
 };
 export default GameProximityController;

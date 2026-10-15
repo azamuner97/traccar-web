@@ -92,6 +92,11 @@ window.proximityAudit = {
     requestProximitySync();
   },
   select: (deviceId) => store.dispatch(devicesActions.selectId(deviceId)),
+  latePeerPacket() {
+    store.dispatch(devicesActions.update([{ id: 12, name: 'Peer' }]));
+    store.dispatch(sessionActions.updatePositions([{ deviceId: 12, latitude: 47, longitude: 8 }]));
+    store.dispatch(devicesActions.selectId(12));
+  },
   offline() {
     failure = true;
     store.dispatch(sessionActions.updateSocket(false));

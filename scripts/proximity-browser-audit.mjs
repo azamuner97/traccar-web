@@ -85,6 +85,10 @@ try {
     );
     assert.equal(await page.locator('[data-testid="selected"]').textContent(), '');
     assert.equal(await page.locator('[data-testid="positions"]').textContent(), '11');
+    await page.evaluate(() => window.proximityAudit.latePeerPacket());
+    assert.equal(await page.locator('[data-testid="devices"]').textContent(), '11');
+    assert.equal(await page.locator('[data-testid="positions"]').textContent(), '11');
+    assert.equal(await page.locator('[data-testid="selected"]').textContent(), '');
     await page.evaluate(() => {
       window.proximityAudit.restore();
       window.proximityAudit.grant(2);
