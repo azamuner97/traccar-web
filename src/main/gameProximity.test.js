@@ -41,7 +41,7 @@ test('circles expire locally and contain count labels only', () => {
   assert.equal(validProximityCircle({ ...circle, latitude: 91 }, now), false);
   assert.equal(proximityCircleLabel(circle), 'Participant proximity: 2 players, 1 supporter');
 });
-test('entry and separation are personal; consequences reach only hunters and spectators', () => {
+test('entry, separation, and sharing starts are personal; group alerts reach only hunters and spectators', () => {
   const common = {
     id: 'alert',
     occurredAt: '2026-10-14T10:00:00Z',
@@ -49,11 +49,40 @@ test('entry and separation are personal; consequences reach only hunters and spe
     message: 'Proximity',
     gameStateDeviceId: 900,
   };
-  for (const type of ['participantProximityEnter', 'participantProximityExit']) {
+  for (const type of [
+    'participantProximityEnter',
+    'participantProximityExit',
+    'participantProximityConsequence',
+  ]) {
     const alert = { ...common, type, audience: 'user', recipientUserId: 111, sourceDeviceId: 11 };
     assert.ok(isValidGameAlert(alert));
     assert.ok(canReceiveGameAlert(alert, user('player')));
+    assert.ok(canReceiveGameAlert(alert, user('supporter')));
     assert.equal(canReceiveGameAlert(alert, { ...user('player'), id: 112 }), false);
+    assert.equal(
+      canReceiveGameAlert(alert, {
+        ...user('player'),
+        attributes: { ...user('player').attributes, traccarToolAssignedDeviceId: 12 },
+      }),
+      false,
+    );
+    assert.equal(
+      canReceiveGameAlert(alert, {
+        ...user('player'),
+        attributes: { ...user('player').attributes, traccarToolSessionDeviceId: 901 },
+      }),
+      false,
+    );
+    assert.equal(
+      isValidGameAlert({
+        ...alert,
+        audience: 'session',
+        recipientUserId: undefined,
+        sourceDeviceId: undefined,
+      }),
+      false,
+    );
+    assert.equal(isValidGameAlert({ ...alert, audience: 'hunters' }), false);
   }
   const consequence = { ...common, type: 'participantProximityConsequence', audience: 'hunters' };
   assert.ok(isValidGameAlert(consequence));

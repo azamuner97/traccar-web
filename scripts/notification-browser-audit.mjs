@@ -479,6 +479,42 @@ try {
     recipientUserId: 6,
     sourceDeviceId: 101,
   };
+  for (const role of ['player', 'supporter']) {
+    await page.evaluate((value) => window.notificationAudit.setRole(value), role);
+    await synchronize();
+    const personal = {
+      ...(await makeAlert(`sharing-start-${role}`)),
+      type: 'participantProximityConsequence',
+      audience: 'user',
+      recipientUserId: 5,
+      sourceDeviceId: 100,
+      message:
+        '[12:00:00] Your approximate location is now being shared with hunters and spectators because you remained too close to another participant. Please move apart.',
+    };
+    await emit([personal]);
+    await banner.getByText(personal.message).waitFor();
+    assert.equal(await soundCount(), ++expectedSounds);
+    assert.ok((await historyIds()).includes(personal.id));
+    await emit([personal]);
+    await synchronize();
+    assert.equal(
+      await soundCount(),
+      expectedSounds,
+      'duplicate sharing starts do not repeat the sound',
+    );
+    const unrelated = {
+      ...personal,
+      id: personal.id + '-other',
+      recipientUserId: 6,
+      sourceDeviceId: 101,
+    };
+    await emit([unrelated]);
+    await synchronize();
+    assert.ok(!(await historyIds()).includes(unrelated.id));
+    assert.equal(await soundCount(), expectedSounds);
+  }
+  await page.evaluate(() => window.notificationAudit.setRole('player'));
+  await synchronize();
   await emit([anotherUser]);
   await synchronize();
   assert.equal(await soundCount(), expectedSounds);

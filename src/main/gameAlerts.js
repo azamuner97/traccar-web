@@ -6,6 +6,7 @@ const sessionAlertTypes = new Set(['speedhunt', 'playerCaught', 'notificationTes
 const targetedAlertTypes = new Set([
   'participantProximityEnter',
   'participantProximityExit',
+  'participantProximityConsequence',
   'geofenceExit',
   'liveTrackingStarted',
   'liveTrackingStopped',
