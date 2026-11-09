@@ -44,8 +44,7 @@ import { capitalized, requestStateColors } from './gameText';
 const jokerLabels = {
   hunterPositions: 'gameJokerHunterPositions',
   break: 'gameJokerBreak',
-  fakeTimetable: 'gameJokerFakeTimetable',
-  fakeSpeedhunt: 'gameJokerFakeSpeedhunt',
+  fakePing: 'gameJokerFakePing',
 };
 
 const reasonTexts = {
@@ -56,13 +55,13 @@ const reasonTexts = {
   speedhunt: 'gameReasonSpeedhunt',
   noPing: 'gameReasonNoPing',
   planned: 'gameReasonPlanned',
+  noFakeUse: 'gameReasonNoFakeUse',
 };
 
 // Jokers used from the Jokers card: used at once (after a confirmation) or planned on the map.
 const actionLabels = {
   hunterPositions: 'gameJokerUse',
-  fakeTimetable: 'gameFakePlan',
-  fakeSpeedhunt: 'gameFakePlan',
+  fakePing: 'gameFakePlan',
 };
 
 const coordinate = (item) =>
@@ -183,7 +182,7 @@ const reservationText = (t, item) => {
   if (item.kind === 'bound') {
     return t('gameReservationBound', { time: formatClock(item.boundAt), number: item.pingNumber });
   }
-  if (item.type === 'fakeTimetable') {
+  if (item.use === 'timetable') {
     return t('gameReservationArmedTimetable', { time: formatClock(item.scheduledAt) });
   }
   return t('gameReservationArmedSpeedhunt', { number: item.pingNumber });
@@ -348,11 +347,14 @@ const ParticipantGameView = ({ game, user }) => {
   // Timetable pings that already carry the member's fake (requested or armed).
   const planned = new Set(
     requests
-      .filter((item) => item.type === JOKER_REQUESTS.fakeTimetable && isOpenRequest(item))
-      .map((item) => item.parameters?.entryId)
-      .concat(
-        reservations.filter((item) => item.type === 'fakeTimetable').map((item) => item.entryId),
-      ),
+      .filter(
+        (item) =>
+          item.type === JOKER_REQUESTS.fakePing &&
+          isOpenRequest(item) &&
+          Number.isSafeInteger(item.parameters?.entryId),
+      )
+      .map((item) => item.parameters.entryId)
+      .concat(reservations.filter((item) => item.use === 'timetable').map((item) => item.entryId)),
   );
   const availability = Object.fromEntries(
     JOKER_TYPES.map((type) => [
@@ -386,10 +388,11 @@ const ParticipantGameView = ({ game, user }) => {
     run(() => post('/api/game-requests', { type: JOKER_REQUESTS[type] }));
   };
 
+  const fakeUses = availability.fakePing.uses;
   const startJoker = (type) => {
-    if (type === 'fakeTimetable') setPlanning({ kind: 'timetable' });
-    else if (type === 'fakeSpeedhunt') setPlanning({ kind: 'speedhunt' });
-    else setConfirming(type);
+    if (type === 'fakePing') {
+      setPlanning({ kind: fakeUses?.timetable.enabled ? 'timetable' : 'speedhunt' });
+    } else setConfirming(type);
   };
 
   const plan = (request) => {
@@ -418,7 +421,7 @@ const ParticipantGameView = ({ game, user }) => {
         title={t('gameOwnPings')}
         planned={planned}
         onPlan={
-          availability.fakeTimetable.enabled && !busy
+          availability.fakePing.enabled && fakeUses?.timetable.enabled && !busy
             ? (ping) => setPlanning({ kind: 'timetable', entryId: ping.entryId })
             : undefined
         }
@@ -439,6 +442,8 @@ const ParticipantGameView = ({ game, user }) => {
       {planning && (
         <FakePlanDialog
           kind={planning.kind}
+          uses={fakeUses}
+          reasonText={(reason) => t(reasonTexts[reason])}
           pings={pings.filter((item) => item.upcoming && !planned.has(item.entryId))}
           initialEntryId={planning.entryId}
           pingsPerSpeedhunt={game.jokers?.pingsPerSpeedhunt ?? null}

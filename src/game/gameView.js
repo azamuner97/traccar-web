@@ -4,13 +4,14 @@
 
 const gameRoles = new Set(['player', 'supporter', 'hunter', 'spectator']);
 
-export const JOKER_TYPES = ['hunterPositions', 'break', 'fakeTimetable', 'fakeSpeedhunt'];
+export const JOKER_TYPES = ['hunterPositions', 'break', 'fakePing'];
 export const JOKER_REQUESTS = {
   hunterPositions: 'jokerHunterPositions',
   break: 'jokerBreak',
-  fakeTimetable: 'jokerFakeTimetable',
-  fakeSpeedhunt: 'jokerFakeSpeedhunt',
+  fakePing: 'jokerFakePing',
 };
+// One fake-ping joker is used either on a timetable ping or on a ping of the next speedhunt.
+export const FAKE_USES = ['timetable', 'speedhunt'];
 export const OPEN_REQUEST_STATES = new Set(['pending', 'approved', 'executing']);
 export const GAME_INVALIDATIONS = ['game-status', 'game-requests', 'game-jokers', 'game-timetable'];
 export const SPEEDHUNT_REQUESTS = [
@@ -151,6 +152,13 @@ export const inventoryByType = (jokers) => {
 
 const finite = (value) => (Number.isFinite(value) ? value : null);
 
+/** How a fake ping is used: on a timetable ping (entryId) or on the next speedhunt (pingNumber). */
+export const fakeUse = (plan) => {
+  if (Number.isSafeInteger(plan?.entryId)) return 'timetable';
+  if (Number.isSafeInteger(plan?.pingNumber)) return 'speedhunt';
+  return null;
+};
+
 /**
  * One reservation of the member: held by an open request, an armed fake (with its plan) or a speedhunt
  * fake bound to a speedhunt (used). Armed fakes can be cancelled; a timetable fake only until shortly
@@ -163,14 +171,16 @@ export const reservationView = (reservation, offsetMs, now = Date.now()) => {
   else if (reservation?.armed) kind = 'armed';
   const scheduledAt = typeof plan.scheduledAt === 'string' ? plan.scheduledAt : null;
   const scheduled = parseTime(scheduledAt);
+  const use = FAKE_USES.includes(reservation?.use) ? reservation.use : fakeUse(plan);
   let cancellable = kind === 'armed';
-  if (cancellable && reservation.type === 'fakeTimetable') {
+  if (cancellable && use === 'timetable') {
     cancellable =
       scheduled !== null && scheduled - FAKE_CANCEL_CUTOFF_MS > serverNow(offsetMs, now);
   }
   return {
     id: reservation?.id,
     type: reservation?.type,
+    use: reservation?.type === 'fakePing' ? use : null,
     kind,
     requestId: reservation?.requestId ?? null,
     entryId: Number.isSafeInteger(plan.entryId) ? plan.entryId : null,
@@ -212,10 +222,28 @@ export const sortedRequests = (requests) =>
     .filter((item) => item && Number.isSafeInteger(item.id))
     .sort((a, b) => b.id - a.id);
 
+const usable = Object.freeze({ enabled: true, reason: null });
+
+/**
+ * Whether each use of a fake-ping joker is possible now, or why not: a timetable ping needs an upcoming
+ * ping that can carry a fake, and a participant has at most one fake waiting for the next speedhunt.
+ */
+export const fakeUseAvailability = ({ pings = [], reservations = [] } = {}) => ({
+  timetable: pings.some((item) => item.fakeAllowed && item.upcoming)
+    ? usable
+    : { enabled: false, reason: 'noPing' },
+  speedhunt: reservations.some(
+    (item) => item.type === 'fakePing' && item.use === 'speedhunt' && item.kind === 'armed',
+  )
+    ? { enabled: false, reason: 'planned' }
+    : usable,
+});
+
 /**
  * Whether the member can use a joker now, or why not. The server checks everything again; these reasons
  * only avoid requests that would certainly be refused, and none of them depends on whom a speedhunt
- * targets (every participant sees the same speedhunt status).
+ * targets (every participant sees the same speedhunt status). A fake-ping joker also tells which of its
+ * uses are possible (`uses`).
  */
 export const jokerAvailability = (
   type,
@@ -235,15 +263,12 @@ export const jokerAvailability = (
     return { enabled: false, reason: 'open' };
   }
   if (!inventory[type]?.available) return { enabled: false, reason: 'none' };
-  if (type === 'fakeTimetable' && !pings.some((item) => item.fakeAllowed && item.upcoming)) {
-    return { enabled: false, reason: 'noPing' };
-  }
-  // One unbound speedhunt fake per participant; it waits for the next speedhunt.
-  if (
-    type === 'fakeSpeedhunt' &&
-    reservations.some((item) => item.type === 'fakeSpeedhunt' && item.kind === 'armed')
-  ) {
-    return { enabled: false, reason: 'planned' };
+  if (type === 'fakePing') {
+    const uses = fakeUseAvailability({ pings, reservations });
+    if (!uses.timetable.enabled && !uses.speedhunt.enabled) {
+      return { enabled: false, reason: 'noFakeUse', uses };
+    }
+    return { enabled: true, reason: null, uses };
   }
   if (type === 'break') {
     if (breakView(status?.break, offsetMs, now).state === 'active') {
@@ -389,7 +414,7 @@ export const fakeRequest = ({ kind, entryId, pingNumber, latitude, longitude }) 
     longitude: Math.round(longitude * 1e6) / 1e6,
   };
   if (kind === 'timetable' && Number.isSafeInteger(entryId) && entryId > 0) {
-    return { type: JOKER_REQUESTS.fakeTimetable, parameters: { entryId, ...position } };
+    return { type: JOKER_REQUESTS.fakePing, parameters: { entryId, ...position } };
   }
   if (
     kind === 'speedhunt' &&
@@ -397,7 +422,7 @@ export const fakeRequest = ({ kind, entryId, pingNumber, latitude, longitude }) 
     pingNumber >= 1 &&
     pingNumber <= MAX_FAKE_PING_NUMBER
   ) {
-    return { type: JOKER_REQUESTS.fakeSpeedhunt, parameters: { pingNumber, ...position } };
+    return { type: JOKER_REQUESTS.fakePing, parameters: { pingNumber, ...position } };
   }
   return null;
 };

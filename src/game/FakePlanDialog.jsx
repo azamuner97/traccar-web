@@ -17,6 +17,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import MapView, { map } from '../map/core/MapView';
 import { fromMapCoordinates, toMapCoordinates } from '../map/core/mapUtil';
 import {
+  FAKE_USES,
   MAX_FAKE_PING_NUMBER,
   fakePingNumbers,
   fakeRequest,
@@ -61,10 +62,13 @@ const MapPicker = ({ coordinate, center, onPick }) => {
 
 /**
  * Plans a fake ping: a coordinate chosen on the map, and either one of the member's own upcoming timetable
- * pings that can carry a fake, or a ping number of the next speedhunt.
+ * pings that can carry a fake, or a ping number of the next speedhunt. One fake-ping joker serves both uses;
+ * `uses` tells which of them are possible now.
  */
 const FakePlanDialog = ({
-  kind,
+  kind: initialKind,
+  uses,
+  reasonText,
   pings,
   initialEntryId,
   pingsPerSpeedhunt,
@@ -76,7 +80,8 @@ const FakePlanDialog = ({
   const theme = useTheme();
   const phone = useMediaQuery(theme.breakpoints.down('md'));
   const [coordinate, setCoordinate] = useState(null);
-  const choices = kind === 'timetable' ? pings.filter((item) => item.fakeAllowed) : [];
+  const [kind, setKind] = useState(initialKind);
+  const choices = pings.filter((item) => item.fakeAllowed);
   const [entryId, setEntryId] = useState(initialEntryId ?? choices[0]?.entryId ?? '');
   const numbers = fakePingNumbers(pingsPerSpeedhunt);
   const [pingNumber, setPingNumber] = useState(1);
@@ -98,9 +103,7 @@ const FakePlanDialog = ({
           <IconButton edge="start" sx={{ mr: 2 }} onClick={onClose}>
             <CloseIcon />
           </IconButton>
-          <Typography variant="h6">
-            {t(kind === 'timetable' ? 'gameFakeTimetableTitle' : 'gameFakeSpeedhuntTitle')}
-          </Typography>
+          <Typography variant="h6">{t('gameFakeTitle')}</Typography>
         </Toolbar>
       </AppBar>
       <div
@@ -124,6 +127,19 @@ const FakePlanDialog = ({
               })
             : t('gameFakeTapMap')}
         </Typography>
+        <TextField
+          select
+          label={t('gameFakeUse')}
+          value={kind}
+          onChange={(event) => setKind(event.target.value)}
+        >
+          {FAKE_USES.map((use) => (
+            <MenuItem key={use} value={use} disabled={uses ? !uses[use].enabled : false}>
+              {t(use === 'timetable' ? 'gameFakeUseTimetable' : 'gameFakeUseSpeedhunt')}
+              {uses && !uses[use].enabled && reasonText ? ` (${reasonText(uses[use].reason)})` : ''}
+            </MenuItem>
+          ))}
+        </TextField>
         {kind === 'timetable' ? (
           <TextField
             select

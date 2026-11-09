@@ -6,6 +6,8 @@ import {
   connectionState,
   fakePingNumbers,
   fakeRequest,
+  fakeUse,
+  fakeUseAvailability,
   fillText,
   formatCountdown,
   gameAccountKey,
@@ -141,7 +143,8 @@ test('inventories default to zero and ignore unknown types and bad numbers', () 
     overAllocated: 1,
   });
   assert.equal(inventory.break.available, 0);
-  assert.equal(inventory.fakeTimetable.granted, 0);
+  assert.equal(inventory.fakePing.granted, 0);
+  assert.equal(inventory.fakeTimetable, undefined, 'one fake-ping joker');
   assert.equal(inventory.unknown, undefined);
 });
 
@@ -153,28 +156,41 @@ test('reservations: held, armed with cancellation cut-off, and bound fakes', () 
         { id: 1, type: 'hunterPositions', requestId: 40, armed: false, bound: false, plan: {} },
         {
           id: 2,
-          type: 'fakeTimetable',
+          type: 'fakePing',
+          use: 'timetable',
           armed: true,
           bound: false,
-          plan: { scheduledAt: '2026-11-09T12:00:50Z', latitude: 47.1, longitude: 8.5 },
+          plan: {
+            entryId: 40,
+            scheduledAt: '2026-11-09T12:00:50Z',
+            latitude: 47.1,
+            longitude: 8.5,
+          },
         },
         {
           id: 3,
-          type: 'fakeTimetable',
+          type: 'fakePing',
           armed: true,
           bound: false,
-          plan: { scheduledAt: '2026-11-09T12:30:00Z', latitude: 47.2, longitude: 8.6 },
+          plan: {
+            entryId: 41,
+            scheduledAt: '2026-11-09T12:30:00Z',
+            latitude: 47.2,
+            longitude: 8.6,
+          },
         },
-        { id: 4, type: 'fakeSpeedhunt', armed: true, bound: false, plan: { pingNumber: 2 } },
+        { id: 4, type: 'fakePing', armed: true, bound: false, plan: { pingNumber: 2 } },
         {
           id: 5,
-          type: 'fakeSpeedhunt',
+          type: 'fakePing',
+          use: 'speedhunt',
           armed: false,
           bound: true,
           status: 'consumed',
           plan: { pingNumber: 1, boundAt: '2026-11-09T11:50:00Z' },
         },
-        { id: 'x', type: 'fakeSpeedhunt' },
+        { id: 'x', type: 'fakePing' },
+        { id: 6, type: 'fakeTimetable', armed: true, plan: { entryId: 42 } },
       ],
     },
     0,
@@ -192,6 +208,11 @@ test('reservations: held, armed with cancellation cut-off, and bound fakes', () 
   );
   assert.equal(view[0].latitude, 47.1);
   assert.equal(view[4].boundAt, '2026-11-09T11:50:00Z');
+  assert.deepEqual(
+    view.map((item) => item.use),
+    ['timetable', 'timetable', 'speedhunt', null, 'speedhunt'],
+    'the use comes from the server or from the plan',
+  );
 });
 
 test('requests: newest first, approval state and own cancellation', () => {
@@ -448,49 +469,60 @@ test('fakes: valid requests only, ping numbers within the limit, one unbound spe
   assert.deepEqual(
     fakeRequest({ kind: 'timetable', entryId: 40, latitude: 47.1234567, longitude: 8.5 }),
     {
-      type: 'jokerFakeTimetable',
+      type: 'jokerFakePing',
       parameters: { entryId: 40, latitude: 47.123457, longitude: 8.5 },
     },
   );
   assert.deepEqual(fakeRequest({ kind: 'speedhunt', pingNumber: 2, latitude: 1, longitude: 2 }), {
-    type: 'jokerFakeSpeedhunt',
+    type: 'jokerFakePing',
     parameters: { pingNumber: 2, latitude: 1, longitude: 2 },
   });
   assert.equal(fakeRequest({ kind: 'speedhunt', pingNumber: 0, latitude: 1, longitude: 2 }), null);
   assert.equal(fakeRequest({ kind: 'timetable', entryId: 40, latitude: 91, longitude: 2 }), null);
   assert.equal(fakeRequest({ kind: 'timetable', latitude: 1, longitude: 2 }), null);
 
-  const inventory = inventoryByType({
-    inventories: [
-      { type: 'fakeTimetable', available: 1 },
-      { type: 'fakeSpeedhunt', available: 1 },
-    ],
-  });
+  const inventory = inventoryByType({ inventories: [{ type: 'fakePing', available: 1 }] });
   const base = { inventory, requests: [], status: {}, controllerActive: true, offsetMs: 0, now: 0 };
-  assert.equal(jokerAvailability('fakeTimetable', base).reason, 'noPing');
-  assert.ok(
-    jokerAvailability('fakeTimetable', { ...base, pings: [{ fakeAllowed: true, upcoming: true }] })
-      .enabled,
-  );
-  assert.ok(jokerAvailability('fakeSpeedhunt', base).enabled);
+  const ping = [{ fakeAllowed: true, upcoming: true }];
+  const armedSpeedhunt = [{ type: 'fakePing', use: 'speedhunt', kind: 'armed' }];
+  // One joker, two uses: a timetable ping needs one that can carry a fake; the next speedhunt holds one.
+  const noPing = jokerAvailability('fakePing', base);
+  assert.ok(noPing.enabled);
+  assert.deepEqual(noPing.uses, {
+    timetable: { enabled: false, reason: 'noPing' },
+    speedhunt: { enabled: true, reason: null },
+  });
+  assert.ok(jokerAvailability('fakePing', { ...base, pings: ping }).uses.timetable.enabled);
+  const planned = jokerAvailability('fakePing', {
+    ...base,
+    pings: ping,
+    reservations: armedSpeedhunt,
+  });
+  assert.ok(planned.enabled);
+  assert.equal(planned.uses.speedhunt.reason, 'planned');
   assert.equal(
-    jokerAvailability('fakeSpeedhunt', {
-      ...base,
-      reservations: [{ type: 'fakeSpeedhunt', kind: 'armed' }],
-    }).reason,
-    'planned',
+    jokerAvailability('fakePing', { ...base, reservations: armedSpeedhunt }).reason,
+    'noFakeUse',
   );
   assert.ok(
-    jokerAvailability('fakeSpeedhunt', {
+    jokerAvailability('fakePing', {
       ...base,
-      reservations: [{ type: 'fakeSpeedhunt', kind: 'bound' }],
-    }).enabled,
+      reservations: [{ type: 'fakePing', use: 'speedhunt', kind: 'bound' }],
+    }).uses.speedhunt.enabled,
     'a bound fake does not hold the next one',
   );
-  const [planned] = reservationsView(
-    { reservations: [{ id: 3, type: 'fakeTimetable', armed: true, plan: { entryId: 40 } }] },
+  assert.deepEqual(fakeUseAvailability(), {
+    timetable: { enabled: false, reason: 'noPing' },
+    speedhunt: { enabled: true, reason: null },
+  });
+  assert.equal(fakeUse({ entryId: 40 }), 'timetable');
+  assert.equal(fakeUse({ pingNumber: 2 }), 'speedhunt');
+  assert.equal(fakeUse({}), null);
+  const [own] = reservationsView(
+    { reservations: [{ id: 3, type: 'fakePing', armed: true, plan: { entryId: 40 } }] },
     0,
     0,
   );
-  assert.equal(planned.entryId, 40);
+  assert.equal(own.entryId, 40);
+  assert.equal(own.use, 'timetable');
 });
