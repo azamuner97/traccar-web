@@ -171,6 +171,9 @@ export const reservationView = (reservation, offsetMs, now = Date.now()) => {
   else if (reservation?.armed) kind = 'armed';
   const scheduledAt = typeof plan.scheduledAt === 'string' ? plan.scheduledAt : null;
   const scheduled = parseTime(scheduledAt);
+  // A planned break: a break joker armed (or requested) for a later start.
+  const startsAt =
+    reservation?.type === 'break' && parseTime(plan.startsAt) !== null ? plan.startsAt : null;
   const use = FAKE_USES.includes(reservation?.use) ? reservation.use : fakeUse(plan);
   let cancellable = kind === 'armed';
   if (cancellable && use === 'timetable') {
@@ -185,6 +188,7 @@ export const reservationView = (reservation, offsetMs, now = Date.now()) => {
     requestId: reservation?.requestId ?? null,
     entryId: Number.isSafeInteger(plan.entryId) ? plan.entryId : null,
     scheduledAt,
+    startsAt,
     pingNumber: Number.isSafeInteger(plan.pingNumber) ? plan.pingNumber : null,
     latitude: finite(plan.latitude),
     longitude: finite(plan.longitude),
@@ -202,7 +206,8 @@ export const reservationsView = (jokers, offsetMs, now = Date.now()) =>
     .sort(
       (a, b) =>
         reservationOrder[a.kind] - reservationOrder[b.kind] ||
-        (parseTime(a.scheduledAt) ?? Infinity) - (parseTime(b.scheduledAt) ?? Infinity) ||
+        (parseTime(a.scheduledAt ?? a.startsAt) ?? Infinity) -
+          (parseTime(b.scheduledAt ?? b.startsAt) ?? Infinity) ||
         b.id - a.id,
     );
 
@@ -271,10 +276,15 @@ export const jokerAvailability = (
     return { enabled: true, reason: null, uses };
   }
   if (type === 'break') {
+    // A break can always be planned for later; only one that starts now waits for the own break to end and
+    // for no speedhunt to run (every participant gets the same answer).
+    let nowAvailability = usable;
     if (breakView(status?.break, offsetMs, now).state === 'active') {
-      return { enabled: false, reason: 'onBreak' };
+      nowAvailability = { enabled: false, reason: 'onBreak' };
+    } else if (status?.speedhunt?.active) {
+      nowAvailability = { enabled: false, reason: 'speedhunt' };
     }
-    if (status?.speedhunt?.active) return { enabled: false, reason: 'speedhunt' };
+    return { enabled: true, reason: null, now: nowAvailability };
   }
   return { enabled: true, reason: null };
 };
@@ -389,6 +399,41 @@ export const timetableView = (
       };
     })
     .sort((a, b) => parseTime(a.scheduledAt) - parseTime(b.scheduledAt) || a.entryId - b.entryId);
+};
+
+/**
+ * The member's planned breaks, earliest first: armed ones (cancellable until they start; due once their
+ * start has passed, when the break begins as soon as possible) and ones still held by an open request.
+ */
+export const plannedBreaksView = (reservations, offsetMs, now = Date.now()) =>
+  (Array.isArray(reservations) ? reservations : [])
+    .filter((item) => item.type === 'break' && item.startsAt && item.kind !== 'bound')
+    .map((item) => ({
+      id: item.id,
+      kind: item.kind,
+      requestId: item.requestId,
+      startsAt: item.startsAt,
+      due: parseTime(item.startsAt) <= serverNow(offsetMs, now),
+      remainingMs: remainingMs(item.startsAt, offsetMs, now),
+      cancellable: item.kind === 'armed',
+    }))
+    .sort((a, b) => parseTime(a.startsAt) - parseTime(b.startsAt));
+
+/** A device-local date and time as a datetime-local input shows it, e.g. 2026-11-09T14:30. */
+export const localDateTimeInput = (milliseconds) => {
+  const date = new Date(milliseconds);
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`;
+};
+
+/** The request for a break now, or planned from a datetime-local value (any time; a passed one starts now). */
+export const breakRequest = ({ when, time }) => {
+  if (when === 'now') return { type: JOKER_REQUESTS.break };
+  if (when !== 'later' || typeof time !== 'string' || !time) return null;
+  const start = new Date(time);
+  if (!Number.isFinite(start.getTime())) return null;
+  return { type: JOKER_REQUESTS.break, parameters: { startsAt: start.toISOString() } };
 };
 
 /** The ping numbers a speedhunt fake may name: 1 to the session's pings per speedhunt. */

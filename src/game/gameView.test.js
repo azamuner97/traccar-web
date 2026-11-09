@@ -5,6 +5,7 @@ import {
   canCancelRequest,
   connectionState,
   fakePingNumbers,
+  breakRequest,
   fakeRequest,
   fakeUse,
   fakeUseAvailability,
@@ -17,7 +18,9 @@ import {
   isGameInvalidation,
   jokerAvailability,
   listenGameSync,
+  localDateTimeInput,
   participantsView,
+  plannedBreaksView,
   remainingMs,
   requestGameSync,
   requestState,
@@ -240,7 +243,11 @@ test('joker availability never depends on whom a speedhunt targets', () => {
     ],
   });
   const base = { inventory, requests: [], status: {}, controllerActive: true, offsetMs: 0, now: 0 };
-  assert.deepEqual(jokerAvailability('break', base), { enabled: true, reason: null });
+  assert.deepEqual(jokerAvailability('break', base), {
+    enabled: true,
+    reason: null,
+    now: { enabled: true, reason: null },
+  });
   assert.equal(jokerAvailability('break', { ...base, controllerActive: false }).reason, 'paused');
   assert.equal(
     jokerAvailability('break', {
@@ -249,10 +256,13 @@ test('joker availability never depends on whom a speedhunt targets', () => {
     }).reason,
     'open',
   );
-  assert.equal(
-    jokerAvailability('break', { ...base, status: { speedhunt: { active: true } } }).reason,
-    'speedhunt',
-  );
+  // During a speedhunt a break can still be planned; only one that starts now waits.
+  const duringSpeedhunt = jokerAvailability('break', {
+    ...base,
+    status: { speedhunt: { active: true } },
+  });
+  assert.ok(duringSpeedhunt.enabled);
+  assert.equal(duringSpeedhunt.now.reason, 'speedhunt');
   // Only the anonymous status counts: the same for every participant, target or not.
   assert.equal(
     jokerAvailability('hunterPositions', { ...base, status: { speedhunt: { active: true } } })
@@ -264,7 +274,7 @@ test('joker availability never depends on whom a speedhunt targets', () => {
       ...base,
       now: at('2026-11-09T12:05:00Z'),
       status: { break: { active: true, endsAt: '2026-11-09T12:15:00Z' } },
-    }).reason,
+    }).now.reason,
     'onBreak',
   );
   assert.equal(
@@ -274,6 +284,48 @@ test('joker availability never depends on whom a speedhunt targets', () => {
     }).reason,
     'none',
   );
+});
+
+test('planned breaks: listed by start, cancellable while armed, requested now or later', () => {
+  const now = at('2026-11-09T12:00:00Z');
+  const reservations = reservationsView(
+    {
+      reservations: [
+        { id: 1, type: 'break', armed: true, plan: { startsAt: '2026-11-09T13:00:00Z' } },
+        { id: 2, type: 'break', requestId: 9, plan: { startsAt: '2026-11-09T12:30:00Z' } },
+        { id: 3, type: 'break', armed: true, plan: { startsAt: '2026-11-09T11:55:00Z' } },
+        { id: 4, type: 'break', requestId: 10, plan: {} },
+      ],
+    },
+    0,
+    now,
+  );
+  assert.equal(
+    reservations.find((item) => item.id === 4).startsAt,
+    null,
+    'a break that starts now',
+  );
+  assert.deepEqual(
+    plannedBreaksView(reservations, 0, now).map((item) => [
+      item.id,
+      item.kind,
+      item.due,
+      item.cancellable,
+    ]),
+    [
+      [3, 'armed', true, true],
+      [2, 'held', false, false],
+      [1, 'armed', false, true],
+    ],
+  );
+  assert.equal(plannedBreaksView(reservations, 0, now)[2].remainingMs, 3600000);
+  assert.deepEqual(breakRequest({ when: 'now' }), { type: 'jokerBreak' });
+  const later = breakRequest({ when: 'later', time: localDateTimeInput(now + 3600000) });
+  assert.equal(later.type, 'jokerBreak');
+  assert.equal(Date.parse(later.parameters.startsAt), now + 3600000);
+  assert.equal(breakRequest({ when: 'later', time: '' }), null);
+  assert.equal(breakRequest({ when: 'later', time: 'soon' }), null);
+  assert.match(localDateTimeInput(now), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
 });
 
 test('answers are validated and texts filled', () => {
