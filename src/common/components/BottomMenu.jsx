@@ -16,6 +16,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import MapIcon from '@mui/icons-material/Map';
 import PersonIcon from '@mui/icons-material/Person';
 import ExitToAppIcon from '@mui/icons-material/ExitToApp';
+import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 
 import { errorsActions, sessionActions } from '../../store';
 import { useTranslation } from './LocalizationProvider';
@@ -23,12 +24,15 @@ import { useRestriction } from '../util/permissions';
 import { nativePostMessage } from './NativeInterface';
 import fetchOrThrow from '../util/fetchOrThrow';
 import { removeNotificationToken } from '../util/notificationTokens';
+import { gameRole, holdsJokers } from '../../game/gameView';
+import useGameTranslation from '../../game/useGameTranslation';
 
 const BottomMenu = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const dispatch = useDispatch();
   const t = useTranslation();
+  const gameT = useGameTranslation();
 
   const readonly = useRestriction('readonly');
   const disableReports = useRestriction('disableReports');
@@ -38,6 +42,8 @@ const BottomMenu = () => {
   const selectedDeviceId = useSelector((state) => state.devices.selectedId);
 
   const [anchorEl, setAnchorEl] = useState(null);
+  // Players and supporters manage their jokers, breaks and requests on the Game page.
+  const showGame = holdsJokers(gameRole(user));
 
   const currentSelection = () => {
     if (location.pathname === `/settings/user/${user.id}`) {
@@ -48,6 +54,9 @@ const BottomMenu = () => {
     }
     if (location.pathname.startsWith('/reports')) {
       return 'reports';
+    }
+    if (location.pathname === '/game') {
+      return 'game';
     }
     if (location.pathname === '/') {
       return 'map';
@@ -126,6 +135,9 @@ const BottomMenu = () => {
       case 'settings':
         navigate('/settings/preferences?menu=true');
         break;
+      case 'game':
+        navigate('/game');
+        break;
       case 'account':
         setAnchorEl(event.currentTarget);
         break;
@@ -149,6 +161,13 @@ const BottomMenu = () => {
           }
           value="map"
         />
+        {showGame && (
+          <BottomNavigationAction
+            label={gameT('gameTitle')}
+            icon={<SportsEsportsIcon />}
+            value="game"
+          />
+        )}
         {!disableReports && (
           <BottomNavigationAction
             label={t('reportTitle')}

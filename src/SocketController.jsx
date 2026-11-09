@@ -25,6 +25,8 @@ import GameNotificationsController from './main/GameNotificationsController';
 import GameProximityController from './main/GameProximityController';
 import { requestProximitySync } from './main/gameProximity';
 import { requestGameNotificationSync } from './main/gameNotificationSync';
+import GameController from './game/GameController';
+import { isGameInvalidation, requestGameSync } from './game/gameView';
 
 const logoutCode = 4000;
 
@@ -155,6 +157,8 @@ const SocketController = () => {
       dispatch(sessionActions.updateSocket(true));
       requestGameNotificationSync();
       requestProximitySync();
+      // Game state may have changed while the connection was down.
+      requestGameSync();
       socket.send(JSON.stringify({ logs: includeLogsRef.current }));
       geofenceRefreshScheduler.schedule();
       drawingRefreshScheduler.schedule();
@@ -225,6 +229,9 @@ const SocketController = () => {
       }
       if (Array.isArray(data.invalidate) && data.invalidate.includes('game-notifications')) {
         requestGameNotificationSync();
+      }
+      if (isGameInvalidation(data.invalidate)) {
+        requestGameSync();
       }
       if (
         Array.isArray(data.invalidate) &&
@@ -358,6 +365,7 @@ const SocketController = () => {
       ))}
       <GameNotificationsController playAlarm={playAlarm} />
       <GameProximityController />
+      <GameController />
     </>
   );
 };

@@ -59,6 +59,7 @@ const UserConnectionsPage = lazy(() => import('./settings/UserConnectionsPage'))
 const LogsPage = lazy(() => import('./reports/LogsPage'));
 const SharePage = lazy(() => import('./settings/SharePage'));
 const AnnouncementPage = lazy(() => import('./settings/AnnouncementPage'));
+const GamePage = lazy(() => import('./game/GamePage'));
 const EmulatorPage = lazy(() => import('./other/EmulatorPage'));
 const StreamPage = lazy(() => import('./other/StreamPage'));
 const AuditPage = lazy(() => import('./reports/AuditPage'));
@@ -133,6 +134,7 @@ const Navigation = () => {
           <Route path="network/:positionId" element={<NetworkPage />} />
           <Route path="event/:id" element={<EventPage />} />
           <Route path="replay" element={<ReplayPage />} />
+          <Route path="game" element={<GamePage />} />
           <Route path="geofences" element={<GeofencesPage />} />
           <Route path="emulator" element={<EmulatorPage />} />
           <Route path="stream" element={<StreamPage />} />

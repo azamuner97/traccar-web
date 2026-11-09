@@ -14,6 +14,7 @@ import { maintenancesReducer as maintenances } from './maintenances';
 import { calendarsReducer as calendars } from './calendars';
 import { drawingsReducer as drawings } from './drawings';
 import { gameProximityReducer as gameProximity } from './gameProximity';
+import { gameReducer as game } from './game';
 import throttleMiddleware from './throttleMiddleware';
 
 const reducer = combineReducers({
@@ -30,6 +31,7 @@ const reducer = combineReducers({
   calendars,
   drawings,
   gameProximity,
+  game,
 });
 
 export { errorsActions } from './errors';
@@ -45,6 +47,7 @@ export { maintenancesActions } from './maintenances';
 export { calendarsActions } from './calendars';
 export { drawingsActions } from './drawings';
 export { gameProximityActions } from './gameProximity';
+export { gameActions } from './game';
 
 export default configureStore({
   reducer,
