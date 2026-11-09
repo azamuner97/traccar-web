@@ -5,6 +5,7 @@ import { makeStyles } from 'tss-react/mui';
 import BackIcon from '../common/components/BackIcon';
 import GameStateCard from './GameStateCard';
 import ParticipantGameView from './ParticipantGameView';
+import HunterGameView from './HunterGameView';
 import { gameRole, holdsJokers } from './gameView';
 import useGameTranslation from './useGameTranslation';
 
@@ -30,7 +31,7 @@ const useStyles = makeStyles()((theme) => ({
   },
 }));
 
-/** The member's own game view: status, jokers, breaks and requests (players and supporters). */
+/** The member's game view: players and supporters manage their own game, hunters the speedhunts. */
 const GamePage = () => {
   const { classes } = useStyles();
   const navigate = useNavigate();
@@ -53,8 +54,13 @@ const GamePage = () => {
       <div className={classes.content}>
         <div className={classes.column}>
           <GameStateCard game={game} socket={socket} showSpeedhunt={holdsJokers(role)} />
-          {holdsJokers(role) && game.loaded && <ParticipantGameView game={game} userId={user.id} />}
-          {role && !holdsJokers(role) && <Alert severity="info">{t('gameRoleNotYet')}</Alert>}
+          {holdsJokers(role) && game.loaded && <ParticipantGameView game={game} user={user} />}
+          {role && !holdsJokers(role) && game.loaded && (
+            <HunterGameView game={game} controls={role === 'hunter'} />
+          )}
+          {role === 'spectator' && game.loaded && (
+            <Alert severity="info">{t('gameSpectatorNote')}</Alert>
+          )}
         </div>
       </div>
     </div>

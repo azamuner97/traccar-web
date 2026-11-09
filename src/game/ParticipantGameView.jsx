@@ -1,4 +1,5 @@
 import { Fragment, useState } from 'react';
+import { useSelector } from 'react-redux';
 import {
   Button,
   Card,
@@ -32,9 +33,13 @@ import {
   requestState,
   reservationsView,
   sortedRequests,
+  timetableView,
 } from './gameView';
 import useGameTranslation from './useGameTranslation';
 import useNow from './useNow';
+import TimetableCard from './TimetableCard';
+import FakePlanDialog from './FakePlanDialog';
+import { capitalized, requestStateColors } from './gameText';
 
 const jokerLabels = {
   hunterPositions: 'gameJokerHunterPositions',
@@ -49,21 +54,16 @@ const reasonTexts = {
   none: 'gameReasonNone',
   onBreak: 'gameReasonOnBreak',
   speedhunt: 'gameReasonSpeedhunt',
+  noPing: 'gameReasonNoPing',
+  planned: 'gameReasonPlanned',
 };
 
-const stateColors = {
-  pending: 'default',
-  awaitingApproval: 'warning',
-  approved: 'info',
-  executing: 'info',
-  succeeded: 'success',
-  failed: 'error',
-  rejected: 'error',
-  expired: 'default',
-  cancelled: 'default',
+// Jokers used from the Jokers card: used at once (after a confirmation) or planned on the map.
+const actionLabels = {
+  hunterPositions: 'gameJokerUse',
+  fakeTimetable: 'gameFakePlan',
+  fakeSpeedhunt: 'gameFakePlan',
 };
-
-const capitalized = (value) => String(value).charAt(0).toUpperCase() + String(value).slice(1);
 
 const coordinate = (item) =>
   item.latitude !== null && item.longitude !== null
@@ -133,7 +133,7 @@ const JokersCard = ({ inventory, availability, onUse, busy }) => {
       <List dense>
         {JOKER_TYPES.map((type) => {
           const item = inventory[type];
-          const usable = type === 'hunterPositions';
+          const usable = Boolean(actionLabels[type]);
           const secondary = [
             t('gameJokerCounts', {
               available: item.available,
@@ -158,7 +158,7 @@ const JokersCard = ({ inventory, availability, onUse, busy }) => {
                     disabled={!availability[type].enabled || busy}
                     onClick={() => onUse(type)}
                   >
-                    {t('gameJokerUse')}
+                    {t(actionLabels[type])}
                   </Button>
                 ) : null
               }
@@ -288,7 +288,7 @@ const RequestsCard = ({ requests, userId, offsetMs, now, onCancel, busy }) => {
                         <span>{t(`gameRequestType${capitalized(request.type)}`)}</span>
                         <Chip
                           size="small"
-                          color={stateColors[state] || 'default'}
+                          color={requestStateColors[state] || 'default'}
                           label={t(`gameRequestState${capitalized(state)}`)}
                         />
                       </Stack>
@@ -310,20 +310,52 @@ const RequestsCard = ({ requests, userId, offsetMs, now, onCancel, busy }) => {
   );
 };
 
-/** A player's or supporter's own game: break, jokers, reservations and plans, and requests. */
-const ParticipantGameView = ({ game, userId }) => {
+/**
+ * A player's or supporter's own game: break, jokers, own timetable pings, reservations and plans
+ * (fakes are planned on a map), and requests.
+ */
+const ParticipantGameView = ({ game, user }) => {
   const t = useGameTranslation();
   const now = useNow();
+  const socket = useSelector((state) => state.session.socket);
+  const ownPosition = useSelector(
+    (state) => state.session.positions[user.attributes?.traccarToolAssignedDeviceId],
+  );
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(null);
+  const [planning, setPlanning] = useState(null);
 
   const status = game.status?.status || {};
   const controllerActive = game.status?.controllerActive === true;
   const inventory = inventoryByType(game.jokers);
   const requests = sortedRequests(game.requests);
   const reservations = reservationsView(game.jokers, game.offsetMs, now);
+  // The member's own break marks their own pings inside it (no fake can be planned there).
+  const ownDeviceId = Number(user.attributes?.traccarToolAssignedDeviceId);
+  const pings = timetableView(game.timetable, {
+    participants: [
+      {
+        deviceId: ownDeviceId,
+        caught: false,
+        break: breakView(status.break, game.offsetMs, now),
+      },
+    ],
+    offsetMs: game.offsetMs,
+    now,
+    controllerActive,
+    connected: socket !== false,
+  });
+  // Timetable pings that already carry the member's fake (requested or armed).
+  const planned = new Set(
+    requests
+      .filter((item) => item.type === JOKER_REQUESTS.fakeTimetable && isOpenRequest(item))
+      .map((item) => item.parameters?.entryId)
+      .concat(
+        reservations.filter((item) => item.type === 'fakeTimetable').map((item) => item.entryId),
+      ),
+  );
   const availability = Object.fromEntries(
-    ['hunterPositions', 'break'].map((type) => [
+    JOKER_TYPES.map((type) => [
       type,
       jokerAvailability(type, {
         inventory,
@@ -332,6 +364,8 @@ const ParticipantGameView = ({ game, userId }) => {
         controllerActive,
         offsetMs: game.offsetMs,
         now,
+        pings,
+        reservations,
       }),
     ]),
   );
@@ -352,6 +386,17 @@ const ParticipantGameView = ({ game, userId }) => {
     run(() => post('/api/game-requests', { type: JOKER_REQUESTS[type] }));
   };
 
+  const startJoker = (type) => {
+    if (type === 'fakeTimetable') setPlanning({ kind: 'timetable' });
+    else if (type === 'fakeSpeedhunt') setPlanning({ kind: 'speedhunt' });
+    else setConfirming(type);
+  };
+
+  const plan = (request) => {
+    setPlanning(null);
+    run(() => post('/api/game-requests', request));
+  };
+
   return (
     <>
       <BreakCard
@@ -365,8 +410,18 @@ const ParticipantGameView = ({ game, userId }) => {
       <JokersCard
         inventory={inventory}
         availability={availability}
-        onUse={setConfirming}
+        onUse={startJoker}
         busy={busy}
+      />
+      <TimetableCard
+        pings={pings}
+        title={t('gameOwnPings')}
+        planned={planned}
+        onPlan={
+          availability.fakeTimetable.enabled && !busy
+            ? (ping) => setPlanning({ kind: 'timetable', entryId: ping.entryId })
+            : undefined
+        }
       />
       <ReservationsCard
         reservations={reservations}
@@ -375,12 +430,27 @@ const ParticipantGameView = ({ game, userId }) => {
       />
       <RequestsCard
         requests={requests}
-        userId={userId}
+        userId={user.id}
         offsetMs={game.offsetMs}
         now={now}
         busy={busy}
         onCancel={(id) => run(() => post(`/api/game-requests/${id}/cancel`))}
       />
+      {planning && (
+        <FakePlanDialog
+          kind={planning.kind}
+          pings={pings.filter((item) => item.upcoming && !planned.has(item.entryId))}
+          initialEntryId={planning.entryId}
+          pingsPerSpeedhunt={game.jokers?.pingsPerSpeedhunt ?? null}
+          center={
+            ownPosition
+              ? { latitude: ownPosition.latitude, longitude: ownPosition.longitude }
+              : null
+          }
+          onClose={() => setPlanning(null)}
+          onSubmit={plan}
+        />
+      )}
       <Dialog open={Boolean(confirming)} onClose={() => setConfirming(null)}>
         <DialogContent>
           {confirming &&

@@ -12,7 +12,15 @@ export const JOKER_REQUESTS = {
   fakeSpeedhunt: 'jokerFakeSpeedhunt',
 };
 export const OPEN_REQUEST_STATES = new Set(['pending', 'approved', 'executing']);
-export const GAME_INVALIDATIONS = ['game-status', 'game-requests', 'game-jokers'];
+export const GAME_INVALIDATIONS = ['game-status', 'game-requests', 'game-jokers', 'game-timetable'];
+export const SPEEDHUNT_REQUESTS = [
+  'speedhuntStaticPing',
+  'speedhuntLivePing',
+  'speedhuntStopLivePing',
+  'speedhuntTerminate',
+];
+// The highest ping a speedhunt fake may name when speedhunts have no ping limit.
+export const MAX_FAKE_PING_NUMBER = 1000;
 // The server refuses to cancel a timetable fake this close to its ping.
 export const FAKE_CANCEL_CUTOFF_MS = 60000;
 
@@ -102,11 +110,12 @@ export const formatCountdown = (milliseconds) => {
 export const breakView = (published, offsetMs, now = Date.now()) => {
   if (!published || published.active !== true) return { state: 'none' };
   const endsAt = parseTime(published.endsAt);
-  if (endsAt === null) return { state: 'active', endsAt: null, remainingMs: null };
+  const startedAt = parseTime(published.startedAt) === null ? null : published.startedAt;
+  if (endsAt === null) return { state: 'active', startedAt, endsAt: null, remainingMs: null };
   const left = endsAt - serverNow(offsetMs, now);
   return left > 0
-    ? { state: 'active', endsAt: published.endsAt, remainingMs: left }
-    : { state: 'ending', endsAt: published.endsAt, remainingMs: 0 };
+    ? { state: 'active', startedAt, endsAt: published.endsAt, remainingMs: left }
+    : { state: 'ending', startedAt, endsAt: published.endsAt, remainingMs: 0 };
 };
 
 /** disconnected (no live connection), loading, error, paused (no Tool runs the game) or running. */
@@ -164,6 +173,7 @@ export const reservationView = (reservation, offsetMs, now = Date.now()) => {
     type: reservation?.type,
     kind,
     requestId: reservation?.requestId ?? null,
+    entryId: Number.isSafeInteger(plan.entryId) ? plan.entryId : null,
     scheduledAt,
     pingNumber: Number.isSafeInteger(plan.pingNumber) ? plan.pingNumber : null,
     latitude: finite(plan.latitude),
@@ -209,13 +219,32 @@ export const sortedRequests = (requests) =>
  */
 export const jokerAvailability = (
   type,
-  { inventory, requests, status, controllerActive, offsetMs, now = Date.now() },
+  {
+    inventory,
+    requests,
+    status,
+    controllerActive,
+    offsetMs,
+    now = Date.now(),
+    pings = [],
+    reservations = [],
+  },
 ) => {
   if (!controllerActive) return { enabled: false, reason: 'paused' };
   if (requests.some((item) => item.type === JOKER_REQUESTS[type] && isOpenRequest(item))) {
     return { enabled: false, reason: 'open' };
   }
   if (!inventory[type]?.available) return { enabled: false, reason: 'none' };
+  if (type === 'fakeTimetable' && !pings.some((item) => item.fakeAllowed && item.upcoming)) {
+    return { enabled: false, reason: 'noPing' };
+  }
+  // One unbound speedhunt fake per participant; it waits for the next speedhunt.
+  if (
+    type === 'fakeSpeedhunt' &&
+    reservations.some((item) => item.type === 'fakeSpeedhunt' && item.kind === 'armed')
+  ) {
+    return { enabled: false, reason: 'planned' };
+  }
   if (type === 'break') {
     if (breakView(status?.break, offsetMs, now).state === 'active') {
       return { enabled: false, reason: 'onBreak' };
@@ -223,6 +252,154 @@ export const jokerAvailability = (
     if (status?.speedhunt?.active) return { enabled: false, reason: 'speedhunt' };
   }
   return { enabled: true, reason: null };
+};
+
+/**
+ * The players and supporters of the hunters' and spectators' view, with their named speedhunt state and
+ * break. Players and supporters never receive this list from the server.
+ */
+export const participantsView = (status, offsetMs, now = Date.now()) =>
+  (Array.isArray(status?.participants) ? status.participants : [])
+    .filter((item) => item && Number.isSafeInteger(item.deviceId))
+    .map((item) => {
+      const speedhunt = item.speedhunt && typeof item.speedhunt === 'object' ? item.speedhunt : {};
+      return {
+        deviceId: item.deviceId,
+        name: typeof item.name === 'string' && item.name ? item.name : `#${item.deviceId}`,
+        role: item.role,
+        caught: item.caught === true,
+        speedhunt: {
+          operation: speedhunt.operation === true,
+          running: speedhunt.running === true,
+          pings: Number.isSafeInteger(speedhunt.pings) ? speedhunt.pings : 0,
+          live: speedhunt.live === true,
+          liveUntil: typeof speedhunt.liveUntil === 'string' ? speedhunt.liveUntil : null,
+          revision: Number.isSafeInteger(speedhunt.revision) ? speedhunt.revision : null,
+        },
+        break: breakView(item.break, offsetMs, now),
+      };
+    })
+    .sort((a, b) => Number(a.caught) - Number(b.caught) || a.name.localeCompare(b.name));
+
+/**
+ * Which shared speedhunt actions a hunter can request for a participant, mirroring the Tool's checks;
+ * the Tool and the server decide.
+ */
+export const speedhuntActions = (participant, { requests, controllerActive }) => {
+  const open = requests.some(
+    (item) =>
+      item.targetDeviceId === participant.deviceId &&
+      SPEEDHUNT_REQUESTS.includes(item.type) &&
+      isOpenRequest(item),
+  );
+  const blocked =
+    !controllerActive || participant.caught || open || participant.speedhunt.revision === null;
+  const ping = !blocked && participant.break.state !== 'active' && !participant.speedhunt.live;
+  let reason = null;
+  if (!controllerActive) reason = 'paused';
+  else if (participant.caught) reason = 'caught';
+  else if (open) reason = 'open';
+  else if (participant.break.state === 'active') reason = 'onBreak';
+  return {
+    speedhuntStaticPing: ping,
+    speedhuntLivePing: ping,
+    speedhuntStopLivePing: !blocked && participant.speedhunt.live,
+    speedhuntTerminate:
+      !blocked && (participant.speedhunt.running || participant.speedhunt.operation),
+    reason,
+  };
+};
+
+const PING_STATES = new Set(['scheduled', 'sent', 'skipped', 'failed']);
+
+/**
+ * The timetable pings a member sees, with the state to show: scheduled, due (its time has passed and the
+ * Tool sends it), disconnected (its time has passed while no Tool runs or this page is offline), sent,
+ * skipped or failed; hunters also see protected (inside the participant's break) and out (caught).
+ */
+export const timetableView = (
+  pings,
+  { participants = [], offsetMs, now = Date.now(), controllerActive, connected = true } = {},
+) => {
+  const byDevice = new Map(participants.map((item) => [item.deviceId, item]));
+  const current = serverNow(offsetMs, now);
+  return (Array.isArray(pings) ? pings : [])
+    .filter(
+      (item) =>
+        item &&
+        Number.isSafeInteger(item.entryId) &&
+        parseTime(item.scheduledAt) !== null &&
+        PING_STATES.has(item.state),
+    )
+    .map((item) => {
+      const scheduled = parseTime(item.scheduledAt);
+      const participant = byDevice.get(item.deviceId);
+      let state = item.state;
+      if (state === 'scheduled') {
+        const pause = participant?.break;
+        const breakEnds = pause?.endsAt ? parseTime(pause.endsAt) : null;
+        // Pings from the start of the break (or from now, when its start is unknown) to its end.
+        const breakStarts = pause?.startedAt ? parseTime(pause.startedAt) : current;
+        if (participant?.caught) state = 'out';
+        else if (
+          pause?.state === 'active' &&
+          breakEnds !== null &&
+          scheduled >= breakStarts &&
+          scheduled < breakEnds
+        ) {
+          state = 'protected';
+        } else if (scheduled <= current)
+          state = controllerActive && connected ? 'due' : 'disconnected';
+      }
+      return {
+        entryId: item.entryId,
+        scheduledAt: item.scheduledAt,
+        deviceId: item.deviceId,
+        name: participant?.name ?? null,
+        state,
+        upcoming: scheduled > current,
+        remainingMs: Math.max(0, scheduled - current),
+        // The server refuses a fake on a ping inside the owner's break.
+        fakeAllowed: item.fakeAllowed === true && state !== 'protected',
+      };
+    })
+    .sort((a, b) => parseTime(a.scheduledAt) - parseTime(b.scheduledAt) || a.entryId - b.entryId);
+};
+
+/** The ping numbers a speedhunt fake may name: 1 to the session's pings per speedhunt. */
+export const fakePingNumbers = (pingsPerSpeedhunt) =>
+  Number.isSafeInteger(pingsPerSpeedhunt) && pingsPerSpeedhunt > 0
+    ? Array.from(
+        { length: Math.min(pingsPerSpeedhunt, MAX_FAKE_PING_NUMBER) },
+        (_, index) => index + 1,
+      )
+    : null;
+
+export const validCoordinate = (latitude, longitude) =>
+  Number.isFinite(latitude) &&
+  Number.isFinite(longitude) &&
+  Math.abs(latitude) <= 90 &&
+  Math.abs(longitude) <= 180;
+
+/** The request that plans a fake: on a timetable ping (entryId) or a speedhunt ping (pingNumber). */
+export const fakeRequest = ({ kind, entryId, pingNumber, latitude, longitude }) => {
+  if (!validCoordinate(latitude, longitude)) return null;
+  const position = {
+    latitude: Math.round(latitude * 1e6) / 1e6,
+    longitude: Math.round(longitude * 1e6) / 1e6,
+  };
+  if (kind === 'timetable' && Number.isSafeInteger(entryId) && entryId > 0) {
+    return { type: JOKER_REQUESTS.fakeTimetable, parameters: { entryId, ...position } };
+  }
+  if (
+    kind === 'speedhunt' &&
+    Number.isSafeInteger(pingNumber) &&
+    pingNumber >= 1 &&
+    pingNumber <= MAX_FAKE_PING_NUMBER
+  ) {
+    return { type: JOKER_REQUESTS.fakeSpeedhunt, parameters: { pingNumber, ...position } };
+  }
+  return null;
 };
 
 /** Light validation of the member endpoints' answers before they reach the store. */

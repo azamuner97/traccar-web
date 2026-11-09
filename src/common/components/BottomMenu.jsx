@@ -24,7 +24,7 @@ import { useRestriction } from '../util/permissions';
 import { nativePostMessage } from './NativeInterface';
 import fetchOrThrow from '../util/fetchOrThrow';
 import { removeNotificationToken } from '../util/notificationTokens';
-import { gameRole, holdsJokers } from '../../game/gameView';
+import { gameRole } from '../../game/gameView';
 import useGameTranslation from '../../game/useGameTranslation';
 
 const BottomMenu = () => {
@@ -42,8 +42,8 @@ const BottomMenu = () => {
   const selectedDeviceId = useSelector((state) => state.devices.selectedId);
 
   const [anchorEl, setAnchorEl] = useState(null);
-  // Players and supporters manage their jokers, breaks and requests on the Game page.
-  const showGame = holdsJokers(gameRole(user));
+  // Every game member has a Game page: players and supporters manage their jokers, hunters the speedhunts.
+  const showGame = Boolean(gameRole(user));
 
   const currentSelection = () => {
     if (location.pathname === `/settings/user/${user.id}`) {

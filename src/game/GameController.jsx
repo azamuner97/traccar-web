@@ -44,19 +44,23 @@ const GameController = () => {
       load: async () => {
         lastLoad = Date.now();
         const options = { signal: controller.signal };
-        const [statusResponse, requestsResponse, jokersResponse] = await Promise.all([
-          fetchOrThrow('/api/game-status', options),
-          fetchOrThrow(`/api/game-requests?limit=${REQUEST_LIMIT}`, options),
-          holdsJokers(role) ? fetchOrThrow('/api/game-jokers', options) : Promise.resolve(null),
-        ]);
+        const [statusResponse, requestsResponse, jokersResponse, timetableResponse] =
+          await Promise.all([
+            fetchOrThrow('/api/game-status', options),
+            fetchOrThrow(`/api/game-requests?limit=${REQUEST_LIMIT}`, options),
+            holdsJokers(role) ? fetchOrThrow('/api/game-jokers', options) : Promise.resolve(null),
+            fetchOrThrow('/api/game-timetable', options),
+          ]);
         const receivedAt = Date.now();
         const status = await statusResponse.json();
         const requests = await requestsResponse.json();
         const jokers = jokersResponse ? await jokersResponse.json() : null;
+        const timetable = await timetableResponse.json();
         if (
           !validGameStatus(status) ||
           !Array.isArray(requests) ||
-          (jokers && !validGameJokers(jokers))
+          (jokers && !validGameJokers(jokers)) ||
+          !Array.isArray(timetable)
         ) {
           throw new Error('Invalid game response');
         }
@@ -64,6 +68,7 @@ const GameController = () => {
           status,
           requests,
           jokers,
+          timetable,
           offsetMs: serverOffsetMs(status.serverTime, receivedAt),
           refreshedAt: receivedAt,
         };
