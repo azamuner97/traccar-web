@@ -29,15 +29,12 @@ const LiveShareInfo = () => {
       <Box
         component="ul"
         sx={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 24rem), 1fr))',
-          columnGap: 3,
-          rowGap: 0.5,
           m: 0,
           pl: 2,
           maxHeight: '25vh',
           overflowY: 'auto',
           overflowWrap: 'anywhere',
+          '& li + li': { mt: 0.5 },
         }}
       >
         {shares.map((share) => (
