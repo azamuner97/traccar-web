@@ -46,7 +46,7 @@ const GameController = () => {
         const options = { signal: controller.signal };
         const [statusResponse, requestsResponse, jokersResponse, timetableResponse] =
           await Promise.all([
-            fetchOrThrow('/api/game-status', options),
+            fetchOrThrow('/api/game-status', { ...options, cache: 'no-store' }),
             fetchOrThrow(`/api/game-requests?limit=${REQUEST_LIMIT}`, options),
             holdsJokers(role) ? fetchOrThrow('/api/game-jokers', options) : Promise.resolve(null),
             fetchOrThrow('/api/game-timetable', options),

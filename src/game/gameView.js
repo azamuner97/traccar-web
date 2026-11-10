@@ -74,6 +74,27 @@ export const remainingMs = (deadline, offsetMs, now = Date.now()) => {
   return time === null ? null : Math.max(0, time - serverNow(offsetMs, now));
 };
 
+export const activeHunterLiveShares = (game, user, now) => {
+  if (
+    gameRole(user) !== 'hunter' ||
+    game.key !== gameAccountKey(user) ||
+    game.error ||
+    game.status?.role !== 'hunter' ||
+    !game.status.controllerActive ||
+    !Array.isArray(game.status.status?.liveShares)
+  ) {
+    return [];
+  }
+  return game.status.status.liveShares.filter(
+    (share) =>
+      Number.isSafeInteger(share?.deviceId) &&
+      share.deviceId > 0 &&
+      typeof share.name === 'string' &&
+      share.name.trim() &&
+      (share.endsAt == null || remainingMs(share.endsAt, game.offsetMs, now) > 0),
+  );
+};
+
 /** An absolute time of day on this device, e.g. 14:30 (or 14:30:05 with seconds). */
 export const formatClock = (value, seconds = false) => {
   const time = parseTime(value);

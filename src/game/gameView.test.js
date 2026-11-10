@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  activeHunterLiveShares,
   breakView,
   canCancelRequest,
   connectionState,
@@ -44,6 +45,30 @@ const user = (role, extra = {}) => ({
     traccarToolAssignedDeviceId: 11,
   },
   ...extra,
+});
+
+test('hunter live shares follow the current account, controller and server-clock deadline', () => {
+  const hunter = user('hunter');
+  const always = { deviceId: 11, name: 'Player 1' };
+  const timed = { deviceId: 12, name: 'Player 2', endsAt: '2026-11-10T10:00:00Z' };
+  const now = Date.parse(timed.endsAt) - 5000;
+  const game = {
+    key: gameAccountKey(hunter),
+    offsetMs: 3000,
+    status: {
+      role: 'hunter',
+      controllerActive: true,
+      status: { liveShares: [always, timed, { ...timed, endsAt: 'invalid' }] },
+    },
+  };
+
+  assert.deepEqual(activeHunterLiveShares(game, hunter, now), [always, timed]);
+  assert.deepEqual(activeHunterLiveShares(game, hunter, now + 2000), [always]);
+  assert.deepEqual(activeHunterLiveShares(game, user('spectator'), now), []);
+  assert.deepEqual(activeHunterLiveShares(game, user('hunter', { id: 8 }), now), []);
+  assert.deepEqual(activeHunterLiveShares({ ...game, error: 'offline' }, hunter, now), []);
+  const inactive = { ...game, status: { ...game.status, controllerActive: false } };
+  assert.deepEqual(activeHunterLiveShares(inactive, hunter, now), []);
 });
 const at = (iso) => Date.parse(iso);
 
