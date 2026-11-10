@@ -3,7 +3,6 @@ import { useSelector } from 'react-redux';
 import {
   Button,
   Card,
-  CardActions,
   CardContent,
   Chip,
   Dialog,
@@ -65,7 +64,6 @@ const reasonTexts = {
   runningFakePlanned: 'gameReasonRunningFakePlanned',
 };
 
-// Jokers used from the Jokers card: used at once (after a confirmation) or planned on the map.
 const actionLabels = {
   hunterPositions: 'gameJokerUse',
   fakePing: 'gameFakePlan',
@@ -83,73 +81,68 @@ const post = (url, body) =>
     body: JSON.stringify(body ?? {}),
   });
 
-const BreakCard = ({ status, offsetMs, now, availability, planned, onUse, onCancel, busy }) => {
+const BreakDetails = ({ view, availability, planned, onUse, onCancel, busy }) => {
   const t = useGameTranslation();
-  const view = breakView(status?.break, offsetMs, now);
   return (
-    <Card variant="outlined">
-      <CardContent>
-        <Typography variant="h6" gutterBottom>
-          {t('gameBreak')}
-        </Typography>
-        {view.state === 'active' && (
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
-            <Typography>{t('gameBreakActive', { time: formatClock(view.endsAt) })}</Typography>
-            {view.remainingMs !== null && (
-              <Chip
-                color="success"
-                size="small"
-                label={t('gameBreakRemaining', { time: formatCountdown(view.remainingMs) })}
-              />
-            )}
-          </Stack>
-        )}
-        {view.state === 'ending' && (
-          <Typography>{t('gameBreakEnding', { time: formatClock(view.endsAt) })}</Typography>
-        )}
-        {view.state === 'none' && <Typography>{t('gameBreakNone')}</Typography>}
-        {planned.length > 0 && (
-          <List dense disablePadding>
-            {planned.map((item) => (
-              <ListItem
-                key={item.id}
-                disableGutters
-                secondaryAction={
-                  item.cancellable ? (
-                    <Button size="small" disabled={busy} onClick={() => onCancel(item)}>
-                      {t('gameCancel')}
-                    </Button>
-                  ) : null
+    <Stack spacing={1}>
+      {view.state === 'active' && (
+        <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+          <Typography>{t('gameBreakActive', { time: formatClock(view.endsAt) })}</Typography>
+          {view.remainingMs !== null && (
+            <Chip
+              color="success"
+              size="small"
+              label={t('gameBreakRemaining', { time: formatCountdown(view.remainingMs) })}
+            />
+          )}
+        </Stack>
+      )}
+      {view.state === 'ending' && (
+        <Typography>{t('gameBreakEnding', { time: formatClock(view.endsAt) })}</Typography>
+      )}
+      {view.state === 'none' && <Typography>{t('gameBreakNone')}</Typography>}
+      {planned.length > 0 && (
+        <List dense disablePadding>
+          {planned.map((item) => (
+            <ListItem
+              key={item.id}
+              disableGutters
+              secondaryAction={
+                item.cancellable ? (
+                  <Button size="small" disabled={busy} onClick={() => onCancel(item)}>
+                    {t('gameCancel')}
+                  </Button>
+                ) : null
+              }
+            >
+              <ListItemText
+                primary={
+                  item.due
+                    ? t('gameBreakPlannedDue')
+                    : t('gameBreakPlanned', { time: formatClock(item.startsAt) })
                 }
-              >
-                <ListItemText
-                  primary={
-                    item.due
-                      ? t('gameBreakPlannedDue')
-                      : t('gameBreakPlanned', { time: formatClock(item.startsAt) })
-                  }
-                  secondary={
-                    [
-                      item.kind === 'held' ? t('gameReservationHeldState') : null,
-                      !item.due && item.remainingMs !== null
-                        ? t('gameBreakStartsIn', { time: formatCountdown(item.remainingMs) })
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(' · ') || null
-                  }
-                  sx={item.cancellable ? { pr: 10 } : undefined}
-                />
-              </ListItem>
-            ))}
-          </List>
-        )}
-      </CardContent>
-      <CardActions sx={{ flexWrap: 'wrap', gap: 1 }}>
+                secondary={
+                  [
+                    item.kind === 'held' ? t('gameReservationHeldState') : null,
+                    !item.due && item.remainingMs !== null
+                      ? t('gameBreakStartsIn', { time: formatCountdown(item.remainingMs) })
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ') || null
+                }
+                sx={item.cancellable ? { pr: 10 } : undefined}
+              />
+            </ListItem>
+          ))}
+        </List>
+      )}
+      <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
         <Button
+          size="small"
           variant="contained"
           disabled={!availability.enabled || busy}
-          onClick={() => onUse('break')}
+          onClick={onUse}
         >
           {t('gameBreakTakeOrPlan')}
         </Button>
@@ -158,12 +151,20 @@ const BreakCard = ({ status, offsetMs, now, availability, planned, onUse, onCanc
             {t(reasonTexts[availability.reason])}
           </Typography>
         )}
-      </CardActions>
-    </Card>
+      </Stack>
+    </Stack>
   );
 };
 
-const JokersCard = ({ inventory, availability, onUse, busy }) => {
+const JokersCard = ({
+  inventory,
+  availability,
+  breakStatus,
+  plannedBreaks,
+  onUse,
+  onCancelBreak,
+  busy,
+}) => {
   const t = useGameTranslation();
   return (
     <Card variant="outlined">
@@ -190,6 +191,7 @@ const JokersCard = ({ inventory, availability, onUse, busy }) => {
           return (
             <ListItem
               key={type}
+              sx={type === 'break' ? { display: 'block' } : undefined}
               secondaryAction={
                 usable ? (
                   <Button
@@ -208,6 +210,16 @@ const JokersCard = ({ inventory, availability, onUse, busy }) => {
                 secondary={secondary}
                 sx={usable ? { pr: 10 } : undefined}
               />
+              {type === 'break' && (
+                <BreakDetails
+                  view={breakStatus}
+                  availability={availability.break}
+                  planned={plannedBreaks}
+                  onUse={() => onUse(type)}
+                  onCancel={onCancelBreak}
+                  busy={busy}
+                />
+              )}
             </ListItem>
           );
         })}
@@ -384,6 +396,7 @@ const ParticipantGameView = ({ game, user }) => {
     requests.filter((item) => canCancelRequest(item, user.id)).map((item) => item.id),
   );
   const reservations = reservationsView(game.jokers, cancellableRequestIds);
+  const breakStatus = breakView(status.break, game.offsetMs, now);
   const plannedBreaks = plannedBreaksView(reservations, game.offsetMs, now);
   // The member's own break marks their own pings inside it (no fake can be planned there).
   const ownDeviceId = Number(user.attributes?.traccarToolAssignedDeviceId);
@@ -392,7 +405,7 @@ const ParticipantGameView = ({ game, user }) => {
       {
         deviceId: ownDeviceId,
         caught: false,
-        break: breakView(status.break, game.offsetMs, now),
+        break: breakStatus,
       },
     ],
     offsetMs: game.offsetMs,
@@ -446,7 +459,9 @@ const ParticipantGameView = ({ game, user }) => {
 
   const fakeUses = availability.fakePing.uses;
   const startJoker = (type) => {
-    if (type === 'fakePing') {
+    if (type === 'break') {
+      setBreakPlanning(true);
+    } else if (type === 'fakePing') {
       const kind = Object.keys(fakeUses).find((use) => fakeUses[use].enabled);
       setPlanning({ kind, runToken: runningFakeChoice(status)?.runToken });
     } else setConfirming(type);
@@ -482,20 +497,13 @@ const ParticipantGameView = ({ game, user }) => {
 
   return (
     <>
-      <BreakCard
-        status={status}
-        offsetMs={game.offsetMs}
-        now={now}
-        availability={availability.break}
-        planned={plannedBreaks}
-        onUse={() => setBreakPlanning(true)}
-        onCancel={cancelPlan}
-        busy={busy}
-      />
       <JokersCard
         inventory={inventory}
         availability={availability}
+        breakStatus={breakStatus}
+        plannedBreaks={plannedBreaks}
         onUse={startJoker}
+        onCancelBreak={cancelPlan}
         busy={busy}
       />
       <TimetableCard
