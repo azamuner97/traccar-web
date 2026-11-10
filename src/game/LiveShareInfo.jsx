@@ -21,16 +21,30 @@ const LiveShareInfo = () => {
       sx={{
         borderColor: 'warning.main',
         borderWidth: 2,
-        flexShrink: 0,
+        '& .MuiAlert-message': { flex: 1, minWidth: 0 },
         '@media print': { display: 'none' },
       }}
     >
       <Typography variant="subtitle2">{t('gameLiveShareTitle')}</Typography>
-      <Box component="ul" sx={{ m: 0, pl: 2, maxHeight: '25vh', overflowY: 'auto' }}>
+      <Box
+        component="ul"
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 24rem), 1fr))',
+          columnGap: 3,
+          rowGap: 0.5,
+          m: 0,
+          pl: 2,
+          maxHeight: '25vh',
+          overflowY: 'auto',
+          overflowWrap: 'anywhere',
+        }}
+      >
         {shares.map((share) => (
           <li key={share.deviceId}>
             {share.name}
-            <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
+            <Typography component="span" variant="body2">
+              {' · '}
               <strong>{t('gameLiveShareReason')}</strong> {liveShareReason(t, share)}
             </Typography>
           </li>

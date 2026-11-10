@@ -20,12 +20,16 @@ const useStyles = makeStyles()((theme) => ({
     flexGrow: 1,
     overflowY: 'auto',
   },
-  column: {
-    boxSizing: 'border-box',
-    width: '100%',
-    maxWidth: 720,
-    margin: '0 auto',
+  layout: {
     padding: theme.spacing(2),
+    display: 'flex',
+    flexDirection: 'column',
+    gap: theme.spacing(2),
+  },
+  column: {
+    width: '100%',
+    maxWidth: `calc(720px - ${theme.spacing(4)})`,
+    margin: '0 auto',
     display: 'flex',
     flexDirection: 'column',
     gap: theme.spacing(2),
@@ -53,15 +57,20 @@ const GamePage = () => {
         </Toolbar>
       </AppBar>
       <div className={classes.content}>
-        <div className={classes.column}>
-          <GameStateCard game={game} socket={socket} showSpeedhunt={holdsJokers(role)} />
+        <div className={classes.layout}>
+          <div className={classes.column}>
+            <GameStateCard game={game} socket={socket} showSpeedhunt={holdsJokers(role)} />
+          </div>
           {role === 'hunter' && <LiveShareInfo />}
-          {holdsJokers(role) && game.loaded && <ParticipantGameView game={game} user={user} />}
-          {role && !holdsJokers(role) && game.loaded && (
-            <HunterGameView game={game} controls={role === 'hunter'} />
-          )}
-          {role === 'spectator' && game.loaded && (
-            <Alert severity="info">{t('gameSpectatorNote')}</Alert>
+          {role && game.loaded && (
+            <div className={classes.column}>
+              {holdsJokers(role) ? (
+                <ParticipantGameView game={game} user={user} />
+              ) : (
+                <HunterGameView game={game} controls={role === 'hunter'} />
+              )}
+              {role === 'spectator' && <Alert severity="info">{t('gameSpectatorNote')}</Alert>}
+            </div>
           )}
         </div>
       </div>
