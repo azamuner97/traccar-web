@@ -19,6 +19,7 @@
     "gameRetry": "Erneut versuchen",
     "gameUpdatedAt": "Aktualisiert {time}",
     "gameSpeedhuntActive": "Eine Speedhunt läuft.",
+    "gameSpeedhuntStatusStale": "Zuletzt lief eine Speedhunt. Der aktuelle Status ist nicht verfügbar.",
     "gameSpeedhuntInactive": "Keine Speedhunt läuft.",
     "gameBreak": "Pause",
     "gameBreakActive": "Du bist bis {time} in der Pause.",

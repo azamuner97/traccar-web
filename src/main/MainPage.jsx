@@ -20,13 +20,14 @@ const MainMap = lazy(() => import('./MainMap'));
 const useStyles = makeStyles()((theme) => ({
   root: {
     height: '100%',
+    position: 'relative',
   },
   sidebar: {
     pointerEvents: 'none',
     display: 'flex',
     flexDirection: 'column',
     [theme.breakpoints.up('md')]: {
-      position: 'fixed',
+      position: 'absolute',
       left: 0,
       top: 0,
       height: `calc(100% - ${theme.spacing(3)})`,

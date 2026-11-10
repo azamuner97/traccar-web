@@ -231,7 +231,7 @@ const SocketController = () => {
         requestGameNotificationSync();
       }
       if (isGameInvalidation(data.invalidate)) {
-        requestGameSync();
+        requestGameSync(data.invalidate);
       }
       if (
         Array.isArray(data.invalidate) &&

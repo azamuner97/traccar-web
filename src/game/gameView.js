@@ -44,8 +44,8 @@ export const gameAccountKey = (user) => {
 };
 
 const listeners = new Set();
-/** Ask the game controller to read the member endpoints again (socket invalidation, reconnect, foreground). */
-export const requestGameSync = () => listeners.forEach((listener) => listener());
+/** Ask game listeners to refresh, optionally naming the resources invalidated by the socket. */
+export const requestGameSync = (resources) => listeners.forEach((listener) => listener(resources));
 export const listenGameSync = (listener) => {
   listeners.add(listener);
   return () => listeners.delete(listener);

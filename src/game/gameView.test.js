@@ -81,14 +81,13 @@ test('game invalidations and reconnects ask for a sync', () => {
   assert.ok(isGameInvalidation(['game-timetable']));
   assert.ok(!isGameInvalidation(['game-notifications', 'game-proximity']));
   assert.ok(!isGameInvalidation(undefined));
-  let calls = 0;
-  const unsubscribe = listenGameSync(() => {
-    calls += 1;
-  });
+  const calls = [];
+  const unsubscribe = listenGameSync((resources) => calls.push(resources));
+  requestGameSync(['game-status']);
   requestGameSync();
   unsubscribe();
   requestGameSync();
-  assert.equal(calls, 1);
+  assert.deepEqual(calls, [['game-status'], undefined]);
 });
 
 test('countdowns use the server clock and absolute deadlines', () => {

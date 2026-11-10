@@ -12,10 +12,13 @@ import MotionController from './main/MotionController';
 import TermsDialog from './common/components/TermsDialog';
 import Loader from './common/components/Loader';
 import fetchOrThrow from './common/util/fetchOrThrow';
+import SpeedhuntAlert from './game/SpeedhuntAlert';
+import { gameAccountKey } from './game/gameView';
 
 const useStyles = makeStyles()(() => ({
   page: {
     flexGrow: 1,
+    minHeight: 0,
     overflow: 'auto',
   },
   menu: {
@@ -37,6 +40,7 @@ const App = () => {
   const newServer = useSelector((state) => state.session.server.newServer);
   const termsUrl = useSelector((state) => state.session.server.attributes.termsUrl);
   const user = useSelector((state) => state.session.user);
+  const speedhuntAccount = user?.administrator ? `admin:${user.id}` : gameAccountKey(user);
 
   const acceptTerms = useCatch(async () => {
     const response = await fetchOrThrow(`/api/users/${user.id}`, {
@@ -78,6 +82,7 @@ const App = () => {
       <CachingController />
       <UpdateController />
       <MotionController />
+      {speedhuntAccount && <SpeedhuntAlert key={speedhuntAccount} />}
       <div className={classes.page}>
         <Outlet />
       </div>
