@@ -33,6 +33,7 @@ import {
 import useGameTranslation from './useGameTranslation';
 import useNow from './useNow';
 import TimetableCard from './TimetableCard';
+import SpeedhuntPingHistory from './SpeedhuntPingHistory';
 import { capitalized, requestStateColors } from './gameText';
 
 const actionLabels = {
@@ -76,7 +77,7 @@ const ParticipantRow = ({ participant, limits, actions, controls, onAction, busy
           <Chip size="small" label={t('gameParticipantBreakEnding')} />
         )}
         {speedhunt.running && (
-          <Chip size="small" color="warning" label={`${t('gameSpeedhuntRunning')} · ${pings}`} />
+          <Chip size="small" color="error" label={`${t('gameSpeedhuntRunning')} · ${pings}`} />
         )}
         {!speedhunt.running && speedhunt.operation && (
           <Chip size="small" label={t('gameSpeedhuntOpen')} />
@@ -93,6 +94,7 @@ const ParticipantRow = ({ participant, limits, actions, controls, onAction, busy
           />
         )}
       </Stack>
+      {speedhunt.running && <SpeedhuntPingHistory pings={speedhunt.pingHistory} />}
       {controls && (
         <>
           <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1, mt: 1 }}>

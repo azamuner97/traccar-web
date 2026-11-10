@@ -1,5 +1,7 @@
 import { Alert, Button, Stack, Typography } from '@mui/material';
 import { connectionState, formatClock, requestGameSync } from './gameView';
+import { speedhuntLabel } from './gameText';
+import SpeedhuntPingHistory from './SpeedhuntPingHistory';
 import useGameTranslation from './useGameTranslation';
 
 const severities = {
@@ -27,7 +29,7 @@ const GameStateCard = ({ game, socket, showSpeedhunt }) => {
     error: game.error,
     controllerActive: game.status?.controllerActive,
   });
-  const speedhunt = game.status?.status?.speedhunt?.active === true;
+  const speedhunt = game.status?.status?.speedhunt;
   return (
     <Stack spacing={1}>
       <Alert
@@ -55,8 +57,9 @@ const GameStateCard = ({ game, socket, showSpeedhunt }) => {
         </Alert>
       )}
       {showSpeedhunt && game.loaded && (
-        <Alert severity={speedhunt ? 'warning' : 'info'} variant="outlined">
-          {t(speedhunt ? 'gameSpeedhuntActive' : 'gameSpeedhuntInactive')}
+        <Alert severity={speedhunt?.active ? 'error' : 'info'} variant="outlined">
+          {speedhunt?.active ? speedhuntLabel(t, speedhunt) : t('gameSpeedhuntInactive')}
+          {speedhunt?.active && <SpeedhuntPingHistory pings={speedhunt.pingHistory} />}
         </Alert>
       )}
       {game.refreshedAt && (

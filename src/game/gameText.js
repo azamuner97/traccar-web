@@ -3,6 +3,16 @@
 export const capitalized = (value) =>
   String(value).charAt(0).toUpperCase() + String(value).slice(1);
 
+export const speedhuntLabel = (t, { pingCount, pingLimit }) => {
+  if (!Number.isSafeInteger(pingCount) || pingCount <= 0) return t('gameSpeedhuntActive');
+  return t(
+    Number.isSafeInteger(pingLimit) && pingLimit > 0
+      ? 'gameSpeedhuntActiveWithLimit'
+      : 'gameSpeedhuntActiveWithCount',
+    { count: pingCount, limit: pingLimit },
+  );
+};
+
 export const requestStateColors = {
   pending: 'default',
   awaitingApproval: 'warning',

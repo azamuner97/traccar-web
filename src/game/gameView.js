@@ -335,6 +335,7 @@ export const participantsView = (status, offsetMs, now = Date.now()) =>
           operation: speedhunt.operation === true,
           running: speedhunt.running === true,
           pings: Number.isSafeInteger(speedhunt.pings) ? speedhunt.pings : 0,
+          pingHistory: speedhunt.pingHistory,
           startsRun: speedhunt.startsRun ?? (speedhunt.running !== true && !speedhunt.pings),
           live: speedhunt.live === true,
           liveUntil: typeof speedhunt.liveUntil === 'string' ? speedhunt.liveUntil : null,

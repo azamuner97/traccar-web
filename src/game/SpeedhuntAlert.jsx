@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { useSelector } from 'react-redux';
 import { Box, Typography } from '@mui/material';
 import createRefreshScheduler from '../common/util/refreshScheduler';
+import { speedhuntLabel } from './gameText';
 import { listenGameSync } from './gameView';
 import useGameTranslation from './useGameTranslation';
 
 const SpeedhuntAlert = () => {
   const t = useGameTranslation();
   const socket = useSelector((state) => state.session.socket);
-  const [status, setStatus] = useState('inactive');
+  const [speedhunt, setSpeedhunt] = useState(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -18,14 +19,17 @@ const SpeedhuntAlert = () => {
           signal: controller.signal,
           cache: 'no-store',
         });
-        if (response.status === 401 || response.status === 403) return 'inactive';
+        if (response.status === 401 || response.status === 403) return null;
         if (!response.ok) throw new Error('Could not load speedhunt status');
         const result = await response.json();
         if (typeof result?.active !== 'boolean') throw new Error('Invalid speedhunt status');
-        return result.active ? 'active' : 'inactive';
+        return result.active ? result : null;
       },
-      apply: setStatus,
-      fail: () => setStatus((current) => (current === 'active' ? 'stale' : current)),
+      apply: setSpeedhunt,
+      fail: () =>
+        setSpeedhunt((current) =>
+          current && !current.stale ? { ...current, stale: true } : current,
+        ),
     });
     const unsubscribe = listenGameSync((resources) => {
       if (!resources || resources.includes('game-status')) scheduler.schedule();
@@ -48,11 +52,10 @@ const SpeedhuntAlert = () => {
     };
   }, [socket]);
 
-  const visible = status !== 'inactive';
   return (
     <>
       <Box role="status" sx={{ flexShrink: 0, '@media print': { display: 'none' } }}>
-        {visible && (
+        {speedhunt && (
           <Typography
             component="div"
             variant="body2"
@@ -65,11 +68,11 @@ const SpeedhuntAlert = () => {
               py: 0.5,
             }}
           >
-            {t(status === 'stale' ? 'gameSpeedhuntStatusStale' : 'gameSpeedhuntActive')}
+            {speedhunt.stale ? t('gameSpeedhuntStatusStale') : speedhuntLabel(t, speedhunt)}
           </Typography>
         )}
       </Box>
-      {visible && (
+      {speedhunt && (
         <Box
           aria-hidden="true"
           sx={{
