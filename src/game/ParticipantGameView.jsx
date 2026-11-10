@@ -33,6 +33,8 @@ import {
   requestGameSync,
   requestState,
   reservationsView,
+  runningFakeChoice,
+  selectedRunningFakeChoice,
   serverNow,
   sortedRequests,
   timetableView,
@@ -59,6 +61,8 @@ const reasonTexts = {
   noPing: 'gameReasonNoPing',
   planned: 'gameReasonPlanned',
   noFakeUse: 'gameReasonNoFakeUse',
+  noRunningHunt: 'gameReasonNoRunningHunt',
+  runningFakePlanned: 'gameReasonRunningFakePlanned',
 };
 
 // Jokers used from the Jokers card: used at once (after a confirmation) or planned on the map.
@@ -112,7 +116,7 @@ const BreakCard = ({ status, offsetMs, now, availability, planned, onUse, onCanc
                 disableGutters
                 secondaryAction={
                   item.cancellable ? (
-                    <Button size="small" disabled={busy} onClick={() => onCancel(item.id)}>
+                    <Button size="small" disabled={busy} onClick={() => onCancel(item)}>
                       {t('gameCancel')}
                     </Button>
                   ) : null
@@ -126,7 +130,7 @@ const BreakCard = ({ status, offsetMs, now, availability, planned, onUse, onCanc
                   }
                   secondary={
                     [
-                      item.kind === 'held' ? t('gameRequestStateAwaitingApproval') : null,
+                      item.kind === 'held' ? t('gameReservationHeldState') : null,
                       !item.due && item.remainingMs !== null
                         ? t('gameBreakStartsIn', { time: formatCountdown(item.remainingMs) })
                         : null,
@@ -213,11 +217,13 @@ const JokersCard = ({ inventory, availability, onUse, busy }) => {
 };
 
 const reservationText = (t, item) => {
-  if (item.kind === 'held') {
+  if (item.kind === 'held' && !item.use && !item.startsAt) {
     return t('gameReservationHeld', { joker: t(jokerLabels[item.type]), id: item.requestId });
   }
   if (item.kind === 'bound') {
-    return t('gameReservationBound', { time: formatClock(item.boundAt), number: item.pingNumber });
+    const label =
+      item.use === 'runningSpeedhunt' ? 'gameReservationUsedRunning' : 'gameReservationBound';
+    return t(label, { time: formatClock(item.boundAt), number: item.pingNumber });
   }
   if (item.type === 'break') {
     return t('gameReservationArmedBreak', { time: formatClock(item.startsAt) });
@@ -225,7 +231,12 @@ const reservationText = (t, item) => {
   if (item.use === 'timetable') {
     return t('gameReservationArmedTimetable', { time: formatClock(item.scheduledAt) });
   }
-  return t('gameReservationArmedSpeedhunt', { number: item.pingNumber });
+  return t(
+    item.use === 'runningSpeedhunt'
+      ? 'gameReservationArmedRunning'
+      : 'gameReservationArmedSpeedhunt',
+    { number: item.pingNumber },
+  );
 };
 
 const reservationStates = {
@@ -250,7 +261,7 @@ const ReservationsCard = ({ reservations, onCancel, busy }) => {
                 key={item.id}
                 secondaryAction={
                   item.cancellable ? (
-                    <Button size="small" disabled={busy} onClick={() => onCancel(item.id)}>
+                    <Button size="small" disabled={busy} onClick={() => onCancel(item)}>
                       {t('gameCancel')}
                     </Button>
                   ) : null
@@ -369,7 +380,10 @@ const ParticipantGameView = ({ game, user }) => {
   const controllerActive = game.status?.controllerActive === true;
   const inventory = inventoryByType(game.jokers);
   const requests = sortedRequests(game.requests);
-  const reservations = reservationsView(game.jokers, game.offsetMs, now);
+  const cancellableRequestIds = new Set(
+    requests.filter((item) => canCancelRequest(item, user.id)).map((item) => item.id),
+  );
+  const reservations = reservationsView(game.jokers, cancellableRequestIds);
   const plannedBreaks = plannedBreaksView(reservations, game.offsetMs, now);
   // The member's own break marks their own pings inside it (no fake can be planned there).
   const ownDeviceId = Number(user.attributes?.traccarToolAssignedDeviceId);
@@ -433,7 +447,8 @@ const ParticipantGameView = ({ game, user }) => {
   const fakeUses = availability.fakePing.uses;
   const startJoker = (type) => {
     if (type === 'fakePing') {
-      setPlanning({ kind: fakeUses?.timetable.enabled ? 'timetable' : 'speedhunt' });
+      const kind = Object.keys(fakeUses).find((use) => fakeUses[use].enabled);
+      setPlanning({ kind, runToken: runningFakeChoice(status)?.runToken });
     } else setConfirming(type);
   };
 
@@ -447,7 +462,23 @@ const ParticipantGameView = ({ game, user }) => {
     run(() => post('/api/game-requests', request));
   };
 
-  const cancelReservation = (id) => run(() => post(`/api/game-jokers/reservations/${id}/cancel`));
+  const cancel = (url) =>
+    run(async () => {
+      const response = await fetch(url, { method: 'POST' });
+      if (response.status === 409) {
+        throw new Error(t('gameCancelPlanConflict'));
+      }
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+    });
+
+  const cancelRequest = (id) => cancel(`/api/game-requests/${id}/cancel`);
+
+  const cancelPlan = (item) =>
+    item.kind === 'held'
+      ? cancelRequest(item.requestId)
+      : cancel(`/api/game-jokers/reservations/${item.id}/cancel`);
 
   return (
     <>
@@ -458,7 +489,7 @@ const ParticipantGameView = ({ game, user }) => {
         availability={availability.break}
         planned={plannedBreaks}
         onUse={() => setBreakPlanning(true)}
-        onCancel={cancelReservation}
+        onCancel={cancelPlan}
         busy={busy}
       />
       <JokersCard
@@ -473,18 +504,23 @@ const ParticipantGameView = ({ game, user }) => {
         planned={planned}
         onPlan={
           availability.fakePing.enabled && fakeUses?.timetable.enabled && !busy
-            ? (ping) => setPlanning({ kind: 'timetable', entryId: ping.entryId })
+            ? (ping) =>
+                setPlanning({
+                  kind: 'timetable',
+                  entryId: ping.entryId,
+                  runToken: runningFakeChoice(status)?.runToken,
+                })
             : undefined
         }
       />
-      <ReservationsCard reservations={reservations} busy={busy} onCancel={cancelReservation} />
+      <ReservationsCard reservations={reservations} busy={busy} onCancel={cancelPlan} />
       <RequestsCard
         requests={requests}
         userId={user.id}
         offsetMs={game.offsetMs}
         now={now}
         busy={busy}
-        onCancel={(id) => run(() => post(`/api/game-requests/${id}/cancel`))}
+        onCancel={cancelRequest}
       />
       {breakPlanning && (
         <BreakPlanDialog
@@ -504,6 +540,7 @@ const ParticipantGameView = ({ game, user }) => {
           pings={pings.filter((item) => item.upcoming && !planned.has(item.entryId))}
           initialEntryId={planning.entryId}
           pingsPerSpeedhunt={game.jokers?.pingsPerSpeedhunt ?? null}
+          running={selectedRunningFakeChoice(planning.runToken, status)}
           center={
             ownPosition
               ? { latitude: ownPosition.latitude, longitude: ownPosition.longitude }

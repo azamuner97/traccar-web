@@ -25,6 +25,8 @@ import {
   requestGameSync,
   requestState,
   reservationsView,
+  runningFakeChoice,
+  selectedRunningFakeChoice,
   serverOffsetMs,
   sortedRequests,
   speedhuntActions,
@@ -151,12 +153,11 @@ test('inventories default to zero and ignore unknown types and bad numbers', () 
   assert.equal(inventory.unknown, undefined);
 });
 
-test('reservations: held, armed with cancellation cut-off, and bound fakes', () => {
-  const now = at('2026-11-09T12:00:00Z');
+test('reservations: cancel held plans and armed fakes through delivery', () => {
   const view = reservationsView(
     {
       reservations: [
-        { id: 1, type: 'hunterPositions', requestId: 40, armed: false, bound: false, plan: {} },
+        { id: 1, type: 'fakePing', requestId: 40, armed: false, plan: { pingNumber: 3 } },
         {
           id: 2,
           type: 'fakePing',
@@ -196,16 +197,15 @@ test('reservations: held, armed with cancellation cut-off, and bound fakes', () 
         { id: 6, type: 'fakeTimetable', armed: true, plan: { entryId: 42 } },
       ],
     },
-    0,
-    now,
+    new Set([40]),
   );
   assert.deepEqual(
     view.map((item) => [item.id, item.kind, item.cancellable]),
     [
-      [2, 'armed', false],
+      [2, 'armed', true],
       [3, 'armed', true],
       [4, 'armed', true],
-      [1, 'held', false],
+      [1, 'held', true],
       [5, 'bound', false],
     ],
   );
@@ -213,7 +213,7 @@ test('reservations: held, armed with cancellation cut-off, and bound fakes', () 
   assert.equal(view[4].boundAt, '2026-11-09T11:50:00Z');
   assert.deepEqual(
     view.map((item) => item.use),
-    ['timetable', 'timetable', 'speedhunt', null, 'speedhunt'],
+    ['timetable', 'timetable', 'speedhunt', 'speedhunt', 'speedhunt'],
     'the use comes from the server or from the plan',
   );
 });
@@ -286,7 +286,7 @@ test('joker availability never depends on whom a speedhunt targets', () => {
   );
 });
 
-test('planned breaks: listed by start, cancellable while armed, requested now or later', () => {
+test('planned breaks: listed by start, cancellable while held or armed, requested now or later', () => {
   const now = at('2026-11-09T12:00:00Z');
   const reservations = reservationsView(
     {
@@ -297,8 +297,7 @@ test('planned breaks: listed by start, cancellable while armed, requested now or
         { id: 4, type: 'break', requestId: 10, plan: {} },
       ],
     },
-    0,
-    now,
+    new Set([9]),
   );
   assert.equal(
     reservations.find((item) => item.id === 4).startsAt,
@@ -314,7 +313,7 @@ test('planned breaks: listed by start, cancellable while armed, requested now or
     ]),
     [
       [3, 'armed', true, true],
-      [2, 'held', false, false],
+      [2, 'held', false, true],
       [1, 'armed', false, true],
     ],
   );
@@ -400,28 +399,55 @@ test('hunters see every participant with the named speedhunt state and breaks', 
   );
 });
 
-test('shared speedhunt controls mirror the Tool checks', () => {
+test('hunter speedhunt controls offer static and timed live pings', () => {
   const [anna, ben, cleo, dan] = participantsView(hunterStatus, 0, at('2026-11-09T12:00:00Z'));
-  const base = { requests: [], controllerActive: true };
-  const pick = (actions) =>
-    ['speedhuntStaticPing', 'speedhuntLivePing', 'speedhuntStopLivePing', 'speedhuntTerminate']
-      .filter((type) => actions[type])
-      .join(',');
-  assert.equal(
-    pick(speedhuntActions(anna, base)),
-    'speedhuntStaticPing,speedhuntLivePing,speedhuntTerminate',
-  );
-  assert.equal(pick(speedhuntActions(ben, base)), 'speedhuntStopLivePing');
-  assert.equal(pick(speedhuntActions(cleo, base)), '');
+  const base = { requests: [], controllerActive: true, limits: { fixedLiveMinutes: 5 } };
+  assert.deepEqual(speedhuntActions(anna, base), {
+    speedhuntStaticPing: true,
+    speedhuntLivePing: true,
+    reason: null,
+    repeat: false,
+  });
+  assert.equal(speedhuntActions(anna, { ...base, limits: {} }).speedhuntLivePing, false);
+  assert.equal(speedhuntActions(ben, base).speedhuntStaticPing, false, 'already live');
+  assert.equal(speedhuntActions(ben, base).speedhuntLivePing, false, 'already live');
   assert.equal(speedhuntActions(cleo, base).reason, 'onBreak');
   assert.equal(speedhuntActions(dan, base).reason, 'caught');
   const open = speedhuntActions(anna, {
     ...base,
     requests: [{ type: 'speedhuntStaticPing', targetDeviceId: 11, status: 'approved' }],
   });
-  assert.equal(pick(open), '');
+  assert.equal(open.speedhuntStaticPing, false);
+  assert.equal(open.speedhuntLivePing, false);
   assert.equal(open.reason, 'open');
   assert.equal(speedhuntActions(anna, { ...base, controllerActive: false }).reason, 'paused');
+});
+
+test('repeat targets use separate static and live approvals and honor hard blocking', () => {
+  const [anna] = participantsView(hunterStatus, 0, at('2026-11-09T12:00:00Z'));
+  const participant = { ...anna, speedhunt: { ...anna.speedhunt, startsRun: true } };
+  const limits = {
+    fixedLiveMinutes: 5,
+    allowConsecutiveSpeedhunts: false,
+    limitEnforcement: 'warn',
+    requestApprovals: { speedhuntStaticPing: true, speedhuntLivePing: false },
+  };
+  const base = { requests: [], controllerActive: true, lastSpeedhuntDeviceId: 11, limits };
+  assert.deepEqual(speedhuntActions(participant, base), {
+    speedhuntStaticPing: true,
+    speedhuntLivePing: false,
+    reason: null,
+    repeat: true,
+  });
+  const blocked = speedhuntActions(participant, {
+    ...base,
+    limits: { ...limits, limitEnforcement: 'block' },
+  });
+  assert.equal(blocked.speedhuntStaticPing, false);
+  assert.equal(blocked.speedhuntLivePing, false);
+  assert.equal(blocked.repeat, true);
+  assert.equal(speedhuntActions(anna, base).speedhuntLivePing, true, 'continuation');
+  assert.equal(speedhuntActions(participant, { ...base, lastSpeedhuntDeviceId: 12 }).repeat, false);
 });
 
 test('timetable pings show scheduled, due, disconnected, sent, skipped, failed, break and out', () => {
@@ -543,6 +569,7 @@ test('fakes: valid requests only, ping numbers within the limit, one unbound spe
   assert.deepEqual(noPing.uses, {
     timetable: { enabled: false, reason: 'noPing' },
     speedhunt: { enabled: true, reason: null },
+    runningSpeedhunt: { enabled: false, reason: 'noRunningHunt' },
   });
   assert.ok(jokerAvailability('fakePing', { ...base, pings: ping }).uses.timetable.enabled);
   const planned = jokerAvailability('fakePing', {
@@ -566,15 +593,64 @@ test('fakes: valid requests only, ping numbers within the limit, one unbound spe
   assert.deepEqual(fakeUseAvailability(), {
     timetable: { enabled: false, reason: 'noPing' },
     speedhunt: { enabled: true, reason: null },
+    runningSpeedhunt: { enabled: false, reason: 'noRunningHunt' },
   });
   assert.equal(fakeUse({ entryId: 40 }), 'timetable');
   assert.equal(fakeUse({ pingNumber: 2 }), 'speedhunt');
   assert.equal(fakeUse({}), null);
-  const [own] = reservationsView(
-    { reservations: [{ id: 3, type: 'fakePing', armed: true, plan: { entryId: 40 } }] },
-    0,
-    0,
-  );
+  const [own] = reservationsView({
+    reservations: [{ id: 3, type: 'fakePing', armed: true, plan: { entryId: 40 } }],
+  });
   assert.equal(own.entryId, 40);
   assert.equal(own.use, 'timetable');
+});
+
+test('a running fake selects an anonymous remaining slot and holds only its own run', () => {
+  const running = { runToken: 'a'.repeat(32), firstPing: 2, lastPing: 4 };
+  const selection = { kind: 'runningSpeedhunt', running, latitude: 47, longitude: 8 };
+  assert.deepEqual(runningFakeChoice({ runningFake: running }), running);
+  assert.equal(runningFakeChoice({ runningFake: { ...running, firstPing: 5 } }), null);
+  assert.equal(fakeRequest({ ...selection, pingNumber: 1 }), null);
+  assert.deepEqual(fakeRequest({ ...selection, pingNumber: 3 }), {
+    type: 'jokerFakePing',
+    parameters: { runToken: running.runToken, pingNumber: 3, latitude: 47, longitude: 8 },
+  });
+  const reservations = [
+    {
+      type: 'fakePing',
+      use: 'runningSpeedhunt',
+      kind: 'armed',
+      runToken: running.runToken,
+    },
+  ];
+  assert.equal(
+    fakeUseAvailability({ running, reservations }).runningSpeedhunt.reason,
+    'runningFakePlanned',
+  );
+  const nextRun = { ...running, runToken: 'b'.repeat(32) };
+  assert.ok(fakeUseAvailability({ running: nextRun, reservations }).runningSpeedhunt.enabled);
+  assert.ok(fakeUseAvailability({ running, reservations }).speedhunt.enabled);
+});
+
+test('an open fake picker uses fresh slots and stays pinned to the original hunt', () => {
+  const runningFake = { runToken: 'a'.repeat(32), firstPing: 3, lastPing: 4 };
+  const selected = selectedRunningFakeChoice(runningFake.runToken, { runningFake });
+  assert.equal(selected.firstPing, 3);
+  assert.equal(
+    fakeRequest({
+      kind: 'runningSpeedhunt',
+      running: selected,
+      pingNumber: 2,
+      latitude: 47,
+      longitude: 8,
+    }),
+    null,
+  );
+  assert.equal(selectedRunningFakeChoice(runningFake.runToken, {}), null);
+  assert.equal(
+    selectedRunningFakeChoice(runningFake.runToken, {
+      runningFake: { ...runningFake, runToken: 'b'.repeat(32) },
+    }),
+    null,
+  );
 });

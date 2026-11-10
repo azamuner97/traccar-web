@@ -18,7 +18,9 @@ import {
 import { useCatch } from '../reactHelper';
 import fetchOrThrow from '../common/util/fetchOrThrow';
 import {
+  SPEEDHUNT_PINGS,
   SPEEDHUNT_REQUESTS,
+  fixedLiveMinutes,
   formatClock,
   formatCountdown,
   participantsView,
@@ -36,8 +38,6 @@ import { capitalized, requestStateColors } from './gameText';
 const actionLabels = {
   speedhuntStaticPing: 'gameActionStaticPing',
   speedhuntLivePing: 'gameActionLivePing',
-  speedhuntStopLivePing: 'gameActionStopLivePing',
-  speedhuntTerminate: 'gameActionTerminate',
 };
 
 const reasonTexts = {
@@ -96,21 +96,26 @@ const ParticipantRow = ({ participant, limits, actions, controls, onAction, busy
       {controls && (
         <>
           <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 1, mt: 1 }}>
-            {SPEEDHUNT_REQUESTS.map((type) => (
+            {SPEEDHUNT_PINGS.map((type) => (
               <Button
                 key={type}
                 size="small"
                 variant={type === 'speedhuntStaticPing' ? 'contained' : 'outlined'}
                 disabled={!actions[type] || busy}
-                onClick={() => onAction(participant, type)}
+                onClick={() => onAction(participant, type, actions.repeat)}
               >
                 {t(actionLabels[type])}
               </Button>
             ))}
           </Stack>
           {actions.reason && (
-            <Typography variant="caption" color="textSecondary">
+            <Typography variant="caption" color="textSecondary" display="block">
               {t(reasonTexts[actions.reason])}
+            </Typography>
+          )}
+          {actions.repeat && (
+            <Typography variant="caption" color="textSecondary" display="block">
+              {t('gameRepeatSpeedhunt')}
             </Typography>
           )}
         </>
@@ -191,6 +196,8 @@ const HunterGameView = ({ game, controls }) => {
   const status = game.status?.status || {};
   const controllerActive = game.status?.controllerActive === true;
   const participants = participantsView(status, game.offsetMs, now);
+  const lastTarget = participants.find((item) => item.deviceId === status.lastSpeedhuntDeviceId);
+  const duration = fixedLiveMinutes(status.limits);
   const requests = sortedRequests(game.requests).filter((item) =>
     SPEEDHUNT_REQUESTS.includes(item.type),
   );
@@ -217,12 +224,13 @@ const HunterGameView = ({ game, controls }) => {
   });
 
   const confirm = () => {
-    const { participant, type } = confirming;
+    const { participant, type, repeat } = confirming;
     setConfirming(null);
     run({
       type,
       targetDeviceId: participant.deviceId,
       baseRevision: participant.speedhunt.revision,
+      ...(repeat && { parameters: { confirmConsecutive: true } }),
     });
   };
 
@@ -231,6 +239,18 @@ const HunterGameView = ({ game, controls }) => {
       <Card variant="outlined">
         <CardContent sx={{ pb: 0 }}>
           <Typography variant="h6">{t('gameParticipants')}</Typography>
+          {controls && (
+            <>
+              <Typography color="textSecondary">
+                {lastTarget
+                  ? t('gameLastSpeedhuntTarget', { name: lastTarget.name })
+                  : t('gameNoLastSpeedhunt')}
+              </Typography>
+              {duration === null && (
+                <Typography color="textSecondary">{t('gameLiveDurationRequired')}</Typography>
+              )}
+            </>
+          )}
         </CardContent>
         {participants.length ? (
           <List dense>
@@ -240,9 +260,16 @@ const HunterGameView = ({ game, controls }) => {
                 <ParticipantRow
                   participant={participant}
                   limits={status.limits}
-                  actions={speedhuntActions(participant, { requests, controllerActive })}
+                  actions={speedhuntActions(participant, {
+                    requests,
+                    controllerActive,
+                    limits: status.limits,
+                    lastSpeedhuntDeviceId: status.lastSpeedhuntDeviceId,
+                  })}
                   controls={controls}
-                  onAction={(item, type) => setConfirming({ participant: item, type })}
+                  onAction={(item, type, repeat) =>
+                    setConfirming({ participant: item, type, repeat })
+                  }
                   busy={busy}
                 />
               </Fragment>
@@ -259,10 +286,15 @@ const HunterGameView = ({ game, controls }) => {
       <Dialog open={Boolean(confirming)} onClose={() => setConfirming(null)}>
         <DialogContent>
           {confirming &&
-            t('gameActionConfirm', {
+            t(confirming.repeat ? 'gameRepeatSpeedhuntConfirm' : 'gameActionConfirm', {
               action: t(actionLabels[confirming.type]),
               name: confirming.participant.name,
             })}
+          {confirming?.type === 'speedhuntLivePing' && duration !== null && (
+            <Typography variant="body2" color="textSecondary">
+              {t('gameLiveDuration', { minutes: duration })}
+            </Typography>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setConfirming(null)}>{t('gameDismiss')}</Button>
