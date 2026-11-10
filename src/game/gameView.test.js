@@ -21,6 +21,7 @@ import {
   jokerAvailability,
   listenGameSync,
   localDateTimeInput,
+  participantOverviewView,
   participantsView,
   plannedBreaksView,
   remainingMs,
@@ -76,6 +77,30 @@ test('hunter live shares follow the current account, controller and server-clock
   assert.deepEqual(activeHunterLiveShares(inactive, hunter, now), []);
 });
 const at = (iso) => Date.parse(iso);
+
+test('the catch roster sorts each group by name and reads only explicit player and supporter status', () => {
+  const anna = { deviceId: 11, name: 'Anna', role: 'player', caught: true };
+  const ben = { deviceId: 12, name: 'Ben', role: 'supporter', caught: false };
+  const cleo = { deviceId: 13, name: 'Cleo', role: 'player', caught: false };
+  const dana = { deviceId: 14, name: 'Dana', role: 'supporter', caught: true };
+  const status = {
+    participantOverview: [
+      cleo,
+      dana,
+      { deviceId: 15, name: 'Hunter', role: 'hunter', caught: false },
+      { deviceId: 16, name: 'Unknown', role: 'player' },
+      anna,
+      ben,
+    ],
+  };
+
+  assert.deepEqual(participantOverviewView(status), [ben, cleo, anna, dana]);
+  const returned = { ...anna, caught: false };
+  status.participantOverview[4] = returned;
+  assert.deepEqual(participantOverviewView(status), [returned, ben, cleo, dana]);
+  assert.deepEqual(participantOverviewView({ participants: [ben] }), []);
+  assert.deepEqual(participantOverviewView({ participantOverview: [] }), []);
+});
 
 test('live shares always show a reason and retain the geofence cause', () => {
   const t = (key) => key;

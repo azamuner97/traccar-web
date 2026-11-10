@@ -24,6 +24,7 @@ import {
   canCancelRequest,
   formatClock,
   formatCountdown,
+  gameAccountKey,
   inventoryByType,
   isOpenRequest,
   jokerAvailability,
@@ -41,6 +42,7 @@ import {
 import useGameTranslation from './useGameTranslation';
 import useNow from './useNow';
 import TimetableCard from './TimetableCard';
+import ParticipantOverviewCard from './ParticipantOverviewCard';
 import FakePlanDialog from './FakePlanDialog';
 import BreakPlanDialog from './BreakPlanDialog';
 import { capitalized, requestStateColors } from './gameText';
@@ -521,6 +523,9 @@ const ParticipantGameView = ({ game, user }) => {
             : undefined
         }
       />
+      {game.key === gameAccountKey(user) && (
+        <ParticipantOverviewCard status={status} ownDeviceId={ownDeviceId} />
+      )}
       <ReservationsCard reservations={reservations} busy={busy} onCancel={cancelPlan} />
       <RequestsCard
         requests={requests}

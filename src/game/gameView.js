@@ -338,10 +338,25 @@ export const jokerAvailability = (
   return { enabled: true, reason: null };
 };
 
-/**
- * The players and supporters of the hunters' and spectators' view, with their named speedhunt state and
- * break. Players and supporters never receive this list from the server.
- */
+/** The catch roster for the signed-in player or supporter. */
+export const participantOverviewView = (status) =>
+  (Array.isArray(status?.participantOverview) ? status.participantOverview : [])
+    .filter(
+      (item) =>
+        Number.isSafeInteger(item?.deviceId) &&
+        item.deviceId > 0 &&
+        typeof item.name === 'string' &&
+        holdsJokers(item.role) &&
+        typeof item.caught === 'boolean',
+    )
+    .sort(
+      (a, b) =>
+        Number(a.caught) - Number(b.caught) ||
+        a.name.localeCompare(b.name) ||
+        a.deviceId - b.deviceId,
+    );
+
+/** The hunters' and spectators' roster, with each participant's speedhunt and break state. */
 export const participantsView = (status, offsetMs, now = Date.now()) =>
   (Array.isArray(status?.participants) ? status.participants : [])
     .filter((item) => item && Number.isSafeInteger(item.deviceId))
