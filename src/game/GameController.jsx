@@ -40,38 +40,44 @@ const GameController = () => {
     if (!key) return undefined;
     const controller = new AbortController();
     let lastLoad = 0;
-    const scheduler = createRefreshScheduler({
+    const options = { signal: controller.signal };
+    const statusScheduler = createRefreshScheduler({
       load: async () => {
         lastLoad = Date.now();
-        const options = { signal: controller.signal };
-        const [statusResponse, requestsResponse, jokersResponse, timetableResponse] =
-          await Promise.all([
-            fetchOrThrow('/api/game-status', { ...options, cache: 'no-store' }),
-            fetchOrThrow(`/api/game-requests?limit=${REQUEST_LIMIT}`, options),
-            holdsJokers(role) ? fetchOrThrow('/api/game-jokers', options) : Promise.resolve(null),
-            fetchOrThrow('/api/game-timetable', options),
-          ]);
+        const response = await fetchOrThrow('/api/game-status', { ...options, cache: 'no-store' });
         const receivedAt = Date.now();
-        const status = await statusResponse.json();
+        const status = await response.json();
+        if (!validGameStatus(status)) throw new Error('Invalid game status');
+        return {
+          status,
+          offsetMs: serverOffsetMs(status.serverTime, receivedAt),
+          refreshedAt: receivedAt,
+        };
+      },
+      apply: (payload) => dispatch(gameActions.refreshStatus({ key, ...payload })),
+      fail: (error) => {
+        if (error.name !== 'AbortError')
+          dispatch(gameActions.statusFailed({ key, message: error.message }));
+      },
+    });
+    const detailsScheduler = createRefreshScheduler({
+      load: async () => {
+        const [requestsResponse, jokersResponse, timetableResponse] = await Promise.all([
+          fetchOrThrow(`/api/game-requests?limit=${REQUEST_LIMIT}`, options),
+          holdsJokers(role) ? fetchOrThrow('/api/game-jokers', options) : Promise.resolve(null),
+          fetchOrThrow('/api/game-timetable', options),
+        ]);
         const requests = await requestsResponse.json();
         const jokers = jokersResponse ? await jokersResponse.json() : null;
         const timetable = await timetableResponse.json();
         if (
-          !validGameStatus(status) ||
           !Array.isArray(requests) ||
           (jokers && !validGameJokers(jokers)) ||
           !Array.isArray(timetable)
         ) {
           throw new Error('Invalid game response');
         }
-        return {
-          status,
-          requests,
-          jokers,
-          timetable,
-          offsetMs: serverOffsetMs(status.serverTime, receivedAt),
-          refreshedAt: receivedAt,
-        };
+        return { requests, jokers, timetable };
       },
       apply: (payload) => dispatch(gameActions.refresh({ key, ...payload })),
       fail: (error) => {
@@ -79,20 +85,25 @@ const GameController = () => {
           dispatch(gameActions.failed({ key, message: error.message }));
       },
     });
-    const unsubscribe = listenGameSync(scheduler.schedule);
-    scheduler.schedule();
+    const schedule = () => {
+      statusScheduler.schedule();
+      detailsScheduler.schedule();
+    };
+    const unsubscribe = listenGameSync(schedule);
+    schedule();
     const interval = setInterval(() => {
       const period = socketRef.current ? CONNECTED_REFRESH_MS : DISCONNECTED_REFRESH_MS;
-      if (Date.now() - lastLoad >= period) scheduler.schedule();
+      if (Date.now() - lastLoad >= period) schedule();
     }, DISCONNECTED_REFRESH_MS);
     const onVisibility = () => {
-      if (!document.hidden) scheduler.schedule();
+      if (!document.hidden) schedule();
     };
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('focus', onVisibility);
     return () => {
       controller.abort();
-      scheduler.cancel();
+      statusScheduler.cancel();
+      detailsScheduler.cancel();
       unsubscribe();
       clearInterval(interval);
       document.removeEventListener('visibilitychange', onVisibility);

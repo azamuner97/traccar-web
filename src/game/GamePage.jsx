@@ -4,6 +4,7 @@ import { Alert, AppBar, IconButton, Toolbar, Typography } from '@mui/material';
 import { makeStyles } from 'tss-react/mui';
 import BackIcon from '../common/components/BackIcon';
 import GameStateCard from './GameStateCard';
+import LiveShareInfo from './LiveShareInfo';
 import ParticipantGameView from './ParticipantGameView';
 import HunterGameView from './HunterGameView';
 import { gameRole, holdsJokers } from './gameView';
@@ -54,6 +55,7 @@ const GamePage = () => {
       <div className={classes.content}>
         <div className={classes.column}>
           <GameStateCard game={game} socket={socket} showSpeedhunt={holdsJokers(role)} />
+          {role === 'hunter' && <LiveShareInfo />}
           {holdsJokers(role) && game.loaded && <ParticipantGameView game={game} user={user} />}
           {role && !holdsJokers(role) && game.loaded && (
             <HunterGameView game={game} controls={role === 'hunter'} />

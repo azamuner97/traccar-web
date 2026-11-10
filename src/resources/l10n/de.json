@@ -11,6 +11,7 @@
     "gameNotificationsEmpty": "Keine Ereignisse oder Spielbenachrichtigungen",
     "gameTitle": "Spiel",
     "gameLiveShareTitle": "Live-Positionen für die Jäger",
+    "gameLiveShareReason": "Grund",
     "gameStateRunning": "Das Spiel läuft.",
     "gameStatePaused": "Zurzeit steuert kein Tool das Spiel. Anfragen sind nur möglich, während es läuft.",
     "gameStateDisconnected": "Verbindung getrennt. Verbinde neu… Die Anzeige ist eventuell veraltet.",

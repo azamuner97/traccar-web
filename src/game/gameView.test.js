@@ -66,7 +66,11 @@ test('hunter live shares follow the current account, controller and server-clock
   assert.deepEqual(activeHunterLiveShares(game, hunter, now + 2000), [always]);
   assert.deepEqual(activeHunterLiveShares(game, user('spectator'), now), []);
   assert.deepEqual(activeHunterLiveShares(game, user('hunter', { id: 8 }), now), []);
-  assert.deepEqual(activeHunterLiveShares({ ...game, error: 'offline' }, hunter, now), []);
+  assert.deepEqual(
+    activeHunterLiveShares({ ...game, error: 'timetable unavailable' }, hunter, now),
+    [always, timed],
+  );
+  assert.deepEqual(activeHunterLiveShares({ ...game, statusError: 'offline' }, hunter, now), []);
   const inactive = { ...game, status: { ...game.status, controllerActive: false } };
   assert.deepEqual(activeHunterLiveShares(inactive, hunter, now), []);
 });

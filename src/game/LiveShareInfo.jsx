@@ -21,14 +21,20 @@ const LiveShareInfo = () => {
         borderColor: 'warning.main',
         borderWidth: 2,
         flexShrink: 0,
-        m: 1,
         '@media print': { display: 'none' },
       }}
     >
       <Typography variant="subtitle2">{t('gameLiveShareTitle')}</Typography>
-      <Box component="ul" sx={{ m: 0, pl: 2 }}>
-        {shares.map(({ deviceId, name }) => (
-          <li key={deviceId}>{name}</li>
+      <Box component="ul" sx={{ m: 0, pl: 2, maxHeight: '25vh', overflowY: 'auto' }}>
+        {shares.map(({ deviceId, name, reason }) => (
+          <li key={deviceId}>
+            {name}
+            {typeof reason === 'string' && reason.trim() && (
+              <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
+                <strong>{t('gameLiveShareReason')}</strong> {reason}
+              </Typography>
+            )}
+          </li>
         ))}
       </Box>
     </Alert>

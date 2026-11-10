@@ -6,7 +6,9 @@ import { createSlice } from '@reduxjs/toolkit';
 const initialState = {
   key: null,
   loaded: false,
+  detailsLoaded: false,
   error: null,
+  statusError: null,
   status: null,
   requests: [],
   jokers: null,
@@ -23,20 +25,31 @@ const { reducer, actions } = createSlice({
       return { ...initialState, key: action.payload ?? null };
     },
     refresh(state, action) {
-      const { key, status, requests, jokers, timetable, offsetMs, refreshedAt } = action.payload;
+      const { key, requests, jokers, timetable } = action.payload;
       if (key !== state.key) return;
-      state.loaded = true;
+      state.detailsLoaded = true;
+      state.loaded = Boolean(state.status);
       state.error = null;
-      state.status = status;
       state.requests = requests;
       state.jokers = jokers;
       state.timetable = timetable ?? [];
+    },
+    refreshStatus(state, action) {
+      const { key, status, offsetMs, refreshedAt } = action.payload;
+      if (key !== state.key) return;
+      state.loaded = state.detailsLoaded;
+      state.statusError = null;
+      state.status = status;
       state.offsetMs = offsetMs;
       state.refreshedAt = refreshedAt;
     },
     failed(state, action) {
       if (action.payload.key !== state.key) return;
       state.error = action.payload.message || 'Error';
+    },
+    statusFailed(state, action) {
+      if (action.payload.key !== state.key) return;
+      state.statusError = action.payload.message || 'Error';
     },
   },
 });

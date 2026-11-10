@@ -13,8 +13,7 @@ import TermsDialog from './common/components/TermsDialog';
 import Loader from './common/components/Loader';
 import fetchOrThrow from './common/util/fetchOrThrow';
 import SpeedhuntAlert from './game/SpeedhuntAlert';
-import LiveShareInfo from './game/LiveShareInfo';
-import { gameAccountKey, gameRole } from './game/gameView';
+import { gameAccountKey } from './game/gameView';
 
 const useStyles = makeStyles()(() => ({
   page: {
@@ -84,7 +83,6 @@ const App = () => {
       <UpdateController />
       <MotionController />
       {speedhuntAccount && <SpeedhuntAlert key={speedhuntAccount} />}
-      {gameRole(user) === 'hunter' && <LiveShareInfo />}
       <div className={classes.page}>
         <Outlet />
       </div>

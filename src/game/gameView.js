@@ -78,7 +78,7 @@ export const activeHunterLiveShares = (game, user, now) => {
   if (
     gameRole(user) !== 'hunter' ||
     game.key !== gameAccountKey(user) ||
-    game.error ||
+    game.statusError ||
     game.status?.role !== 'hunter' ||
     !game.status.controllerActive ||
     !Array.isArray(game.status.status?.liveShares)

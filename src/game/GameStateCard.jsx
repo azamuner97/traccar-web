@@ -23,10 +23,11 @@ const texts = {
 /** Whether the game runs (a Tool controls it), and whether this page is connected and current. */
 const GameStateCard = ({ game, socket, showSpeedhunt }) => {
   const t = useGameTranslation();
+  const error = game.statusError || game.error;
   const state = connectionState({
     socket,
     loaded: game.loaded,
-    error: game.error,
+    error,
     controllerActive: game.status?.controllerActive,
   });
   const speedhunt = game.status?.status?.speedhunt;
@@ -44,7 +45,7 @@ const GameStateCard = ({ game, socket, showSpeedhunt }) => {
       >
         {t(texts[state])}
       </Alert>
-      {game.loaded && game.error && state !== 'disconnected' && (
+      {game.loaded && error && state !== 'disconnected' && (
         <Alert
           severity="warning"
           action={

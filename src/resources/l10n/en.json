@@ -11,6 +11,7 @@
     "gameNotificationsEmpty": "No events or game notifications",
     "gameTitle": "Game",
     "gameLiveShareTitle": "Live positions shared with hunters",
+    "gameLiveShareReason": "Reason",
     "gameStateRunning": "The game is running.",
     "gameStatePaused": "No Tool controls the game right now. Requests can only be sent while it runs.",
     "gameStateDisconnected": "Disconnected. Reconnecting… What is shown may be outdated.",
