@@ -390,10 +390,25 @@ export const speedhuntActions = (
 
 const PING_STATES = new Set(['scheduled', 'sent', 'skipped', 'failed']);
 
+export const timetableSlotsView = (slots, offsetMs, now = Date.now()) => {
+  const current = serverNow(offsetMs, now);
+  const times = new Set(
+    (Array.isArray(slots) ? slots : []).map((item) => parseTime(item?.scheduledAt)),
+  );
+  times.delete(null);
+  return [...times]
+    .sort((a, b) => a - b)
+    .map((time) => ({
+      scheduledAt: new Date(time).toISOString(),
+      upcoming: time > current,
+      remainingMs: Math.max(0, time - current),
+    }));
+};
+
 /**
  * The timetable pings a member sees, with the state to show: scheduled, due (its time has passed and the
  * Tool sends it), disconnected (its time has passed while no Tool runs or this page is offline), sent,
- * skipped or failed; hunters also see protected (inside the participant's break) and out (caught).
+ * skipped or failed; a participant's break or caught state can mark a ping as protected or out.
  */
 export const timetableView = (
   pings,

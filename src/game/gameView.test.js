@@ -30,6 +30,7 @@ import {
   serverOffsetMs,
   sortedRequests,
   speedhuntActions,
+  timetableSlotsView,
   timetableView,
   validGameJokers,
   validGameStatus,
@@ -447,6 +448,24 @@ test('repeat targets use separate static and live approvals and honor hard block
   assert.equal(blocked.repeat, true);
   assert.equal(speedhuntActions(anna, base).speedhuntLivePing, true, 'continuation');
   assert.equal(speedhuntActions(participant, { ...base, lastSpeedhuntDeviceId: 12 }).repeat, false);
+});
+
+test('hunter timetable slots collapse simultaneous pings and advance the countdown at the scheduled time', () => {
+  const now = at('2026-11-09T12:00:00Z');
+  const slots = [
+    { scheduledAt: '2026-11-09T12:05:00Z' },
+    { scheduledAt: '2026-11-09T12:00:01Z' },
+    { scheduledAt: '2026-11-09T13:00:01+01:00', deviceId: 11, state: 'sent' },
+    { scheduledAt: 'bad' },
+  ];
+  assert.deepEqual(timetableSlotsView(slots, 500, now), [
+    { scheduledAt: '2026-11-09T12:00:01.000Z', upcoming: true, remainingMs: 500 },
+    { scheduledAt: '2026-11-09T12:05:00.000Z', upcoming: true, remainingMs: 299500 },
+  ]);
+  assert.deepEqual(timetableSlotsView(slots, 500, now + 500), [
+    { scheduledAt: '2026-11-09T12:00:01.000Z', upcoming: false, remainingMs: 0 },
+    { scheduledAt: '2026-11-09T12:05:00.000Z', upcoming: true, remainingMs: 299000 },
+  ]);
 });
 
 test('timetable pings show scheduled, due, disconnected, sent, skipped, failed, break and out', () => {

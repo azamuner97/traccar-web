@@ -19,7 +19,7 @@ import { capitalized, pingStateColors } from './gameText';
 const PAST_SHOWN = 5;
 const UPCOMING_SHOWN = 20;
 
-/** Timetable pings with their state: the recent past and what comes next, with a countdown to the next. */
+/** Recent and upcoming timetable times, with a countdown and individual ping states where available. */
 const TimetableCard = ({ pings, title, showNames, planned = new Set(), onPlan }) => {
   const t = useGameTranslation();
   const past = pings.filter((item) => !item.upcoming).slice(-PAST_SHOWN);
@@ -42,7 +42,7 @@ const TimetableCard = ({ pings, title, showNames, planned = new Set(), onPlan })
       {shown.length ? (
         <List dense>
           {shown.map((ping, index) => (
-            <Fragment key={ping.entryId}>
+            <Fragment key={ping.entryId ?? ping.scheduledAt}>
               {index > 0 && <Divider component="li" />}
               <ListItem
                 sx={{ opacity: ping.upcoming ? 1 : 0.7 }}
@@ -65,11 +65,13 @@ const TimetableCard = ({ pings, title, showNames, planned = new Set(), onPlan })
                         {formatClock(ping.scheduledAt)}
                         {showNames && ping.name ? ` · ${ping.name}` : ''}
                       </span>
-                      <Chip
-                        size="small"
-                        color={pingStateColors[ping.state] || 'default'}
-                        label={t(`gamePingState${capitalized(ping.state)}`)}
-                      />
+                      {ping.state && (
+                        <Chip
+                          size="small"
+                          color={pingStateColors[ping.state] || 'default'}
+                          label={t(`gamePingState${capitalized(ping.state)}`)}
+                        />
+                      )}
                       {planned.has(ping.entryId) && (
                         <Chip size="small" variant="outlined" label={t('gameFakePlanned')} />
                       )}

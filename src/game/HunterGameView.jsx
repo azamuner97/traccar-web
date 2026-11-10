@@ -28,6 +28,7 @@ import {
   requestState,
   sortedRequests,
   speedhuntActions,
+  timetableSlotsView,
   timetableView,
 } from './gameView';
 import useGameTranslation from './useGameTranslation';
@@ -184,9 +185,8 @@ const RequestsCard = ({ requests }) => {
 };
 
 /**
- * The hunters' game view: every player and supporter with the named speedhunt state and breaks, the
- * shared speedhunt controls, the hunter-facing timetable pings and the session's speedhunt requests.
- * Spectators see the same without controls.
+ * Hunters see roster labels, speedhunt controls and timetable times. Spectators see the named
+ * participant and timetable details with read-only speedhunt status.
  */
 const HunterGameView = ({ game, controls }) => {
   const t = useGameTranslation();
@@ -203,13 +203,15 @@ const HunterGameView = ({ game, controls }) => {
   const requests = sortedRequests(game.requests).filter((item) =>
     SPEEDHUNT_REQUESTS.includes(item.type),
   );
-  const pings = timetableView(game.timetable, {
-    participants,
-    offsetMs: game.offsetMs,
-    now,
-    controllerActive,
-    connected: socket !== false,
-  });
+  const pings = controls
+    ? timetableSlotsView(game.timetable, game.offsetMs, now)
+    : timetableView(game.timetable, {
+        participants,
+        offsetMs: game.offsetMs,
+        now,
+        controllerActive,
+        connected: socket !== false,
+      });
 
   const run = useCatch(async (body) => {
     setBusy(true);
@@ -283,7 +285,7 @@ const HunterGameView = ({ game, controls }) => {
           </CardContent>
         )}
       </Card>
-      <TimetableCard pings={pings} title={t('gameHunterPings')} showNames />
+      <TimetableCard pings={pings} title={t('gameHunterPings')} showNames={!controls} />
       <RequestsCard requests={requests.slice(0, 15)} />
       <Dialog open={Boolean(confirming)} onClose={() => setConfirming(null)}>
         <DialogContent>
