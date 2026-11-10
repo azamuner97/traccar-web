@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { liveShareReason } from './gameText.js';
 import {
   activeHunterLiveShares,
   breakView,
@@ -75,6 +76,22 @@ test('hunter live shares follow the current account, controller and server-clock
   assert.deepEqual(activeHunterLiveShares(inactive, hunter, now), []);
 });
 const at = (iso) => Date.parse(iso);
+
+test('live shares always show a reason and retain the geofence cause', () => {
+  const t = (key) => key;
+  assert.equal(liveShareReason(t, { source: 'geofence' }), 'gameLiveShareGeofence');
+  assert.equal(
+    liveShareReason(t, { source: 'geofence', reason: 'Public transport' }),
+    'gameLiveShareGeofence · Public transport',
+  );
+  assert.equal(
+    liveShareReason(t, { source: 'manual', reason: '  Public transport  ' }),
+    'Public transport',
+  );
+  assert.equal(liveShareReason(t, { source: 'manual', reason: ' ' }), 'gameLiveShareManual');
+  assert.equal(liveShareReason(t, { source: 'speedhunt' }), 'gameLiveShareSpeedhunt');
+  assert.equal(liveShareReason(t, {}), 'gameLiveShareNoReason');
+});
 
 test('only generated game accounts have a game role; players and supporters hold jokers', () => {
   assert.equal(gameRole(user('player')), 'player');

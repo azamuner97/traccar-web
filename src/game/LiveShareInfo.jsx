@@ -1,6 +1,7 @@
 import { useSelector } from 'react-redux';
 import { Alert, Box, Typography } from '@mui/material';
 import { activeHunterLiveShares } from './gameView';
+import { liveShareReason } from './gameText';
 import useGameTranslation from './useGameTranslation';
 import useNow from './useNow';
 
@@ -26,14 +27,12 @@ const LiveShareInfo = () => {
     >
       <Typography variant="subtitle2">{t('gameLiveShareTitle')}</Typography>
       <Box component="ul" sx={{ m: 0, pl: 2, maxHeight: '25vh', overflowY: 'auto' }}>
-        {shares.map(({ deviceId, name, reason }) => (
-          <li key={deviceId}>
-            {name}
-            {typeof reason === 'string' && reason.trim() && (
-              <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
-                <strong>{t('gameLiveShareReason')}</strong> {reason}
-              </Typography>
-            )}
+        {shares.map((share) => (
+          <li key={share.deviceId}>
+            {share.name}
+            <Typography variant="body2" sx={{ overflowWrap: 'anywhere' }}>
+              <strong>{t('gameLiveShareReason')}</strong> {liveShareReason(t, share)}
+            </Typography>
           </li>
         ))}
       </Box>

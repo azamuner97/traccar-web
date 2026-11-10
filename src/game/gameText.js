@@ -13,6 +13,19 @@ export const speedhuntLabel = (t, { pingCount, pingLimit }) => {
   );
 };
 
+const liveShareSources = new Map([
+  ['manual', 'gameLiveShareManual'],
+  ['geofence', 'gameLiveShareGeofence'],
+  ['speedhunt', 'gameLiveShareSpeedhunt'],
+]);
+
+export const liveShareReason = (t, { reason, source }) => {
+  const customReason = typeof reason === 'string' ? reason.trim() : '';
+  const sourceReason = t(liveShareSources.get(source) ?? 'gameLiveShareNoReason');
+  if (source === 'geofence' && customReason) return `${sourceReason} · ${customReason}`;
+  return customReason || sourceReason;
+};
+
 export const requestStateColors = {
   pending: 'default',
   awaitingApproval: 'warning',
