@@ -14,6 +14,7 @@ export const JOKER_REQUESTS = {
 export const FAKE_USES = ['timetable', 'speedhunt', 'runningSpeedhunt'];
 export const OPEN_REQUEST_STATES = new Set(['pending', 'approved', 'executing']);
 export const GAME_INVALIDATIONS = ['game-status', 'game-requests', 'game-jokers', 'game-timetable'];
+export const SPEEDHUNT_HISTORY_INVALIDATION = 'game-speedhunt-history';
 export const SPEEDHUNT_PINGS = ['speedhuntStaticPing', 'speedhuntLivePing'];
 export const SPEEDHUNT_REQUESTS = [
   ...SPEEDHUNT_PINGS,
@@ -52,7 +53,11 @@ export const listenGameSync = (listener) => {
 };
 
 export const isGameInvalidation = (resources) =>
-  Array.isArray(resources) && resources.some((resource) => GAME_INVALIDATIONS.includes(resource));
+  Array.isArray(resources) &&
+  resources.some(
+    (resource) =>
+      GAME_INVALIDATIONS.includes(resource) || resource === SPEEDHUNT_HISTORY_INVALIDATION,
+  );
 
 export const parseTime = (value) => {
   const time = typeof value === 'string' ? Date.parse(value) : NaN;

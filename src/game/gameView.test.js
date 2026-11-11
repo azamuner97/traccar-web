@@ -151,6 +151,7 @@ test('game invalidations and reconnects ask for a sync', () => {
   assert.ok(isGameInvalidation(['devices', 'game-jokers']));
   assert.ok(isGameInvalidation(['game-status']));
   assert.ok(isGameInvalidation(['game-timetable']));
+  assert.ok(isGameInvalidation(['game-speedhunt-history']));
   assert.ok(!isGameInvalidation(['game-notifications', 'game-proximity']));
   assert.ok(!isGameInvalidation(undefined));
   const calls = [];

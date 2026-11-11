@@ -4,6 +4,7 @@ import { gameActions } from '../store';
 import fetchOrThrow from '../common/util/fetchOrThrow';
 import createRefreshScheduler from '../common/util/refreshScheduler';
 import {
+  GAME_INVALIDATIONS,
   gameAccountKey,
   gameRole,
   holdsJokers,
@@ -89,7 +90,11 @@ const GameController = () => {
       statusScheduler.schedule();
       detailsScheduler.schedule();
     };
-    const unsubscribe = listenGameSync(schedule);
+    const unsubscribe = listenGameSync((resources) => {
+      if (!resources || resources.some((resource) => GAME_INVALIDATIONS.includes(resource))) {
+        schedule();
+      }
+    });
     schedule();
     const interval = setInterval(() => {
       const period = socketRef.current ? CONNECTED_REFRESH_MS : DISCONNECTED_REFRESH_MS;

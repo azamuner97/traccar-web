@@ -14,6 +14,7 @@ import {
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { formatTime } from '../common/util/formatter';
+import { listenGameSync, SPEEDHUNT_HISTORY_INVALIDATION } from './gameView';
 import useGameTranslation from './useGameTranslation';
 
 const statusLabels = {
@@ -26,7 +27,7 @@ const SpeedhuntHistoryCard = ({ gameSessionId, controllerActive, refreshedAt, st
   const t = useGameTranslation();
   const titleId = useId();
   const [history, setHistory] = useState({ runs: null, failed: false });
-  const [retry, setRetry] = useState(0);
+  const [reload, setReload] = useState(0);
   const [visibleCount, setVisibleCount] = useState(3);
   const [expanded, setExpanded] = useState({});
 
@@ -57,7 +58,17 @@ const SpeedhuntHistoryCard = ({ gameSessionId, controllerActive, refreshedAt, st
     };
     load();
     return () => controller.abort();
-  }, [gameSessionId, refreshedAt, statusError, retry]);
+  }, [gameSessionId, refreshedAt, statusError, reload]);
+
+  useEffect(
+    () =>
+      listenGameSync((resources) => {
+        if (resources?.includes(SPEEDHUNT_HISTORY_INVALIDATION)) {
+          setReload((value) => value + 1);
+        }
+      }),
+    [],
+  );
 
   const { runs, failed } = history;
   return (
@@ -71,7 +82,7 @@ const SpeedhuntHistoryCard = ({ gameSessionId, controllerActive, refreshedAt, st
             severity={runs ? 'warning' : 'error'}
             sx={{ mt: 1 }}
             action={
-              <Button color="inherit" size="small" onClick={() => setRetry((value) => value + 1)}>
+              <Button color="inherit" size="small" onClick={() => setReload((value) => value + 1)}>
                 {t('gameRetry')}
               </Button>
             }
