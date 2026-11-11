@@ -32,6 +32,25 @@ export const gameRole = (user) => {
 
 export const holdsJokers = (role) => role === 'player' || role === 'supporter';
 
+/** Players and supporters read their own jokers; hunters read the speedhunt jokers of their shared pool. */
+export const readsJokers = (role) => holdsJokers(role) || role === 'hunter';
+
+/** The hunters' shared pool of speedhunt jokers, or null when it was not read. */
+export const speedhuntPoolView = (jokers) => {
+  const item = (Array.isArray(jokers?.inventories) ? jokers.inventories : []).find(
+    (inventory) => inventory?.type === 'speedhunt',
+  );
+  if (!item) return null;
+  const count = (value) => (Number.isSafeInteger(value) && value > 0 ? value : 0);
+  return {
+    granted: count(item.granted),
+    used: count(item.used),
+    reserved: count(item.reserved),
+    available: count(item.available),
+    overAllocated: count(item.overAllocated),
+  };
+};
+
 /** The account, role and assignment the game data belongs to; data for another key is never shown. */
 export const gameAccountKey = (user) => {
   const role = gameRole(user);
@@ -398,7 +417,7 @@ export const fixedLiveMinutes = (limits) => {
 
 export const speedhuntActions = (
   participant,
-  { requests, controllerActive, lastSpeedhuntDeviceId, limits },
+  { requests, controllerActive, lastSpeedhuntDeviceId, limits, pool = null },
 ) => {
   const open = requests.some(
     (item) =>
@@ -409,17 +428,21 @@ export const speedhuntActions = (
   const blocked =
     !controllerActive || participant.caught || open || participant.speedhunt.revision === null;
   const ping = !blocked && participant.break.state !== 'active' && !participant.speedhunt.live;
+  // A ping that starts a speedhunt needs a joker of the hunters' pool; the server reserves it.
+  const noJoker = participant.speedhunt.startsRun && pool !== null && pool.available <= 0;
   let reason = null;
   if (!controllerActive) reason = 'paused';
   else if (participant.caught) reason = 'caught';
   else if (open) reason = 'open';
   else if (participant.break.state === 'active') reason = 'onBreak';
+  else if (noJoker && !participant.speedhunt.live) reason = 'noSpeedhuntJoker';
   const repeat =
     participant.speedhunt.startsRun &&
     participant.deviceId === lastSpeedhuntDeviceId &&
     limits?.allowConsecutiveSpeedhunts === false;
   const allowsPing = (type) =>
     ping &&
+    !noJoker &&
     (!repeat || (limits.limitEnforcement !== 'block' && limits.requestApprovals?.[type] === true));
   return {
     speedhuntStaticPing: allowsPing('speedhuntStaticPing'),

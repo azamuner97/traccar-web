@@ -177,6 +177,8 @@
     "gameReasonCaught": "Ausgeschieden",
     "gameReasonOpenParticipant": "Eine Anfrage für diese Person ist offen",
     "gameReasonParticipantBreak": "Durch eine Pause geschützt",
+    "gameReasonNoSpeedhuntJoker": "Kein Speedhunt-Joker mehr, um eine Speedhunt zu starten; frag die Spielleitung",
+    "gameSpeedhuntJokers": "Speedhunt-Joker: {available} übrig · {reserved} reserviert · {used} benutzt",
     "gameSessionRequests": "Speedhunt-Anfragen",
     "gameRequestBy": "{action} · {target}",
     "gameSpectatorNote": "Zuschauer verfolgen das Spiel ohne Bedienelemente.",

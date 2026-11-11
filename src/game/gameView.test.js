@@ -27,12 +27,14 @@ import {
   remainingMs,
   requestGameSync,
   requestState,
+  readsJokers,
   reservationsView,
   runningFakeChoice,
   selectedRunningFakeChoice,
   serverOffsetMs,
   sortedRequests,
   speedhuntActions,
+  speedhuntPoolView,
   timetableSlotsView,
   timetableView,
   validGameJokers,
@@ -493,6 +495,37 @@ test('hunter speedhunt controls offer static and timed live pings', () => {
   assert.equal(open.speedhuntLivePing, false);
   assert.equal(open.reason, 'open');
   assert.equal(speedhuntActions(anna, { ...base, controllerActive: false }).reason, 'paused');
+});
+
+test('a ping that starts a speedhunt needs a joker of the hunters pool', () => {
+  const [anna] = participantsView(hunterStatus, 0, at('2026-11-09T12:00:00Z'));
+  const starting = { ...anna, speedhunt: { ...anna.speedhunt, startsRun: true } };
+  const running = { ...anna, speedhunt: { ...anna.speedhunt, startsRun: false, running: true } };
+  const base = { requests: [], controllerActive: true, limits: { fixedLiveMinutes: 5 } };
+  const empty = speedhuntPoolView({
+    inventories: [
+      { deviceId: 0, type: 'speedhunt', granted: 2, used: 2, reserved: 0, available: 0 },
+    ],
+    reservations: [],
+  });
+  assert.deepEqual(empty, { granted: 2, used: 2, reserved: 0, available: 0, overAllocated: 0 });
+  const refused = speedhuntActions(starting, { ...base, pool: empty });
+  assert.equal(refused.speedhuntStaticPing, false);
+  assert.equal(refused.speedhuntLivePing, false);
+  assert.equal(refused.reason, 'noSpeedhuntJoker');
+  assert.ok(
+    speedhuntActions(running, { ...base, pool: empty }).speedhuntStaticPing,
+    'a run uses none',
+  );
+  assert.ok(
+    speedhuntActions(starting, { ...base, pool: { ...empty, available: 1 } }).speedhuntStaticPing,
+  );
+  assert.ok(
+    speedhuntActions(starting, base).speedhuntStaticPing,
+    'unknown pool: the server decides',
+  );
+  assert.equal(speedhuntPoolView({ inventories: [], reservations: [] }), null);
+  assert.ok(readsJokers('hunter') && readsJokers('player') && !readsJokers('spectator'));
 });
 
 test('repeat targets use separate static and live approvals and honor hard blocking', () => {

@@ -177,6 +177,8 @@
     "gameReasonCaught": "Out of the game",
     "gameReasonOpenParticipant": "A request for this participant is open",
     "gameReasonParticipantBreak": "Protected by a break",
+    "gameReasonNoSpeedhuntJoker": "No speedhunt joker left to start a speedhunt; ask the operator",
+    "gameSpeedhuntJokers": "Speedhunt jokers: {available} left · {reserved} reserved · {used} used",
     "gameSessionRequests": "Speedhunt requests",
     "gameRequestBy": "{action} · {target}",
     "gameSpectatorNote": "Spectators follow the game without controls.",

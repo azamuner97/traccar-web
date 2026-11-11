@@ -28,6 +28,7 @@ import {
   requestState,
   sortedRequests,
   speedhuntActions,
+  speedhuntPoolView,
   timetableSlotsView,
   timetableView,
 } from './gameView';
@@ -47,6 +48,7 @@ const reasonTexts = {
   caught: 'gameReasonCaught',
   open: 'gameReasonOpenParticipant',
   onBreak: 'gameReasonParticipantBreak',
+  noSpeedhuntJoker: 'gameReasonNoSpeedhuntJoker',
 };
 
 const ParticipantRow = ({ participant, limits, actions, controls, onAction, busy }) => {
@@ -198,6 +200,8 @@ const HunterGameView = ({ game, controls }) => {
   const status = game.status?.status || {};
   const controllerActive = game.status?.controllerActive === true;
   const participants = participantsView(status, game.offsetMs, now);
+  // Hunters share one pool of speedhunt jokers; spectators do not read it.
+  const pool = controls ? speedhuntPoolView(game.jokers) : null;
   const lastTarget = participants.find((item) => item.deviceId === status.lastSpeedhuntDeviceId);
   const duration = fixedLiveMinutes(status.limits);
   const requests = sortedRequests(game.requests).filter((item) =>
@@ -253,6 +257,15 @@ const HunterGameView = ({ game, controls }) => {
               {duration === null && (
                 <Typography color="textSecondary">{t('gameLiveDurationRequired')}</Typography>
               )}
+              {pool && (
+                <Typography color="textSecondary">
+                  {t('gameSpeedhuntJokers', {
+                    available: pool.available,
+                    reserved: pool.reserved,
+                    used: pool.used,
+                  })}
+                </Typography>
+              )}
             </>
           )}
         </CardContent>
@@ -269,6 +282,7 @@ const HunterGameView = ({ game, controls }) => {
                     controllerActive,
                     limits: status.limits,
                     lastSpeedhuntDeviceId: status.lastSpeedhuntDeviceId,
+                    pool,
                   })}
                   controls={controls}
                   onAction={(item, type, repeat) =>

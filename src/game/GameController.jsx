@@ -7,7 +7,7 @@ import {
   GAME_INVALIDATIONS,
   gameAccountKey,
   gameRole,
-  holdsJokers,
+  readsJokers,
   listenGameSync,
   serverOffsetMs,
   validGameJokers,
@@ -65,7 +65,7 @@ const GameController = () => {
       load: async () => {
         const [requestsResponse, jokersResponse, timetableResponse] = await Promise.all([
           fetchOrThrow(`/api/game-requests?limit=${REQUEST_LIMIT}`, options),
-          holdsJokers(role) ? fetchOrThrow('/api/game-jokers', options) : Promise.resolve(null),
+          readsJokers(role) ? fetchOrThrow('/api/game-jokers', options) : Promise.resolve(null),
           fetchOrThrow('/api/game-timetable', options),
         ]);
         const requests = await requestsResponse.json();
