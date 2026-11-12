@@ -2,11 +2,13 @@ import { normalizePositiveInteger, resolveRoleMarker } from '../map/roleMarkerUt
 import { gameMembership } from '../game/gameView.js';
 
 // The live map's game filter (data model 2). Membership and catch state come only from the member's computed
-// status (/api/game-status). The device markers traccarToolRole, traccarToolRoleNumber and traccarToolMirror are
-// presentation the reconciler writes from member and mirror rows; here they only map members to devices, by role
-// and number, which identify a member within a session (numbers are never reused).
+// status (/api/game-status). The device markers traccarToolRole, traccarToolRoleNumber, traccarToolMirror and
+// traccarToolGameSessionId are presentation the Tool's device setup writes from member and mirror rows; here they
+// only map members to devices, by role and number, which identify a member within its session (numbers are never
+// reused). A device marked with another session never stands for a member of this one.
 
 export const mirrorDeviceAttribute = 'traccarToolMirror';
+export const gameSessionDeviceAttribute = 'traccarToolGameSessionId';
 const participantRoles = new Set(['player', 'supporter']);
 
 const memberKey = (role, number) => {
@@ -21,6 +23,18 @@ export const participantKey = (device) => {
 };
 
 export const isMirrorDevice = (device) => device?.attributes?.[mirrorDeviceAttribute] === true;
+
+/**
+ * Whether a device can stand for a member of the given session: it is marked with that session, or it carries no
+ * session marker (set up before the Tool wrote one).
+ */
+export const inGameSession = (device, gameSessionId) => {
+  const marked = normalizePositiveInteger(device?.attributes?.[gameSessionDeviceAttribute]);
+  return !marked || marked === normalizePositiveInteger(gameSessionId);
+};
+
+const sessionParticipantKey = (device, gameSessionId) =>
+  inGameSession(device, gameSessionId) ? participantKey(device) : null;
 
 /**
  * The roster of the member's own role: the catch roster (`participantOverview`) for players and supporters, the
@@ -47,7 +61,11 @@ export const gameMapFilter = (user, game) => {
     const key = item?.caught === true ? memberKey(item.role, item.number) : null;
     if (key) caught.add(key);
   }
-  return { caught, own: memberKey(membership.role, membership.number) };
+  return {
+    caught,
+    own: memberKey(membership.role, membership.number),
+    gameSessionId: membership.gameSessionId,
+  };
 };
 
 export const filterLiveDevices = (devices, filter) =>
@@ -55,7 +73,7 @@ export const filterLiveDevices = (devices, filter) =>
     Object.values(devices || {})
       .filter((device) => {
         if (!filter) return true;
-        const participant = participantKey(device);
+        const participant = sessionParticipantKey(device, filter.gameSessionId);
         return (
           !participant ||
           (!filter.caught.has(participant) &&
@@ -71,12 +89,13 @@ export const filterLivePositions = (positions, visibleDevices) =>
 export const shouldClearSelectedDevice = (selectedDeviceId, visibleDevices) =>
   selectedDeviceId != null && !visibleDevices[selectedDeviceId];
 
-/** The member's own real tracker among the visible devices (not a mirror), found by its role marker. */
+/** The member's own real tracker among the visible devices (not a mirror), found by its session's role marker. */
 export const ownTrackerId = (devices, membership) => {
   const own = memberKey(membership?.role, membership?.number);
   if (!own) return null;
   const device = Object.values(devices || {}).find(
-    (item) => !isMirrorDevice(item) && participantKey(item) === own,
+    (item) =>
+      !isMirrorDevice(item) && sessionParticipantKey(item, membership?.gameSessionId) === own,
   );
   return device?.id ?? null;
 };
