@@ -69,7 +69,12 @@ try {
   page.on('pageerror', (error) => errors.push(error.message));
   await page.clock.install();
   await page.goto(`${server.resolvedUrls.local[0]}__notification_audit__`);
-  await page.waitForFunction(() => window.notificationAudit?.sockets > 0);
+  await page.waitForFunction(
+    () => window.notificationAudit?.sockets > 0 && Boolean(window.notificationAudit.member),
+  );
+  // Member IDs as the fixture binds them (data model 2: a role change makes a new member); 99 is
+  // another member of the session and 20 a participant whose positions a live recipient receives.
+  const memberIds = { player: 40, supporter: 41, hunter: 42, spectator: 43 };
   const banner = page.locator('.MuiSnackbar-anchorOriginTopCenter');
   const mapButton = page.locator('#audit-map button');
   const drawer = page.locator('.MuiDrawer-paper');
@@ -252,7 +257,9 @@ try {
   await closeHistory();
   await page.evaluate(() => window.notificationAudit.flushHistory());
   await page.reload();
-  await page.waitForFunction(() => window.notificationAudit?.sockets > 0);
+  await page.waitForFunction(
+    () => window.notificationAudit?.sockets > 0 && Boolean(window.notificationAudit.member),
+  );
   await waitForHistory(1);
   assert.deepEqual(await historyIds(), ['saved']);
   assert.equal(await unreadCount(), 0);
@@ -361,7 +368,9 @@ try {
   assert.deepEqual(await page.evaluate(() => window.notificationAudit.history.handled), []);
   await page.evaluate(() => window.notificationAudit.flushHistory());
   await page.reload();
-  await page.waitForFunction(() => window.notificationAudit?.sockets > 0);
+  await page.waitForFunction(
+    () => window.notificationAudit?.sockets > 0 && Boolean(window.notificationAudit.member),
+  );
   await waitForHistory(0);
   assert.equal(await soundCount(), 0);
 
@@ -372,7 +381,7 @@ try {
   await page.mouse.move(10, 400);
   await page.clock.fastForward(50000);
   const newGenerationBanner = await makeAlert('generation-reused-id', true);
-  await page.evaluate((alert) => window.notificationAudit.reset(900, [alert]), newGenerationBanner);
+  await page.evaluate((alert) => window.notificationAudit.reset(3, [alert]), newGenerationBanner);
   await banner.getByText(newGenerationBanner.message).waitFor();
   await page.clock.fastForward(11000);
   assert.equal(await banner.count(), 1, 'new generation receives a fresh 60-second banner timer');
@@ -407,9 +416,9 @@ try {
   await page.evaluate(() => window.notificationAudit.setRole('player'));
   await waitForHistory(8);
   const beforeIsolation = await soundCount();
-  await page.evaluate(() => window.notificationAudit.setSession(901));
+  await page.evaluate(() => window.notificationAudit.setSession(4));
   await waitForHistory(0);
-  await page.evaluate(() => window.notificationAudit.setSession(900));
+  await page.evaluate(() => window.notificationAudit.setSession(3));
   await waitForHistory(8);
   assert.equal(await soundCount(), beforeIsolation);
   await page.evaluate(() => window.notificationAudit.logout());
@@ -435,7 +444,9 @@ try {
     }),
   );
   await denied.goto(`${server.resolvedUrls.local[0]}__notification_audit__`);
-  await denied.waitForFunction(() => window.notificationAudit?.sockets > 0);
+  await denied.waitForFunction(
+    () => window.notificationAudit?.sockets > 0 && Boolean(window.notificationAudit.member),
+  );
   await denied.evaluate(() =>
     window.notificationAudit.emit([
       {
@@ -462,8 +473,8 @@ try {
       ...(await makeAlert(`personal-${type}`)),
       type,
       audience: 'user',
-      recipientUserId: 5,
-      sourceDeviceId: 100,
+      recipientMemberId: memberIds.player,
+      sourceMemberId: memberIds.player,
       message: `[12:00:00] ${type}: Anarchist:in. Reason: Usage of public transport.`,
     };
     await emit([personal]);
@@ -476,8 +487,8 @@ try {
     ...(await makeAlert('private-other')),
     type: 'liveTrackingStarted',
     audience: 'user',
-    recipientUserId: 6,
-    sourceDeviceId: 101,
+    recipientMemberId: 99,
+    sourceMemberId: 99,
   };
   for (const role of ['player', 'supporter']) {
     await page.evaluate((value) => window.notificationAudit.setRole(value), role);
@@ -486,8 +497,8 @@ try {
       ...(await makeAlert(`sharing-start-${role}`)),
       type: 'participantProximityConsequence',
       audience: 'user',
-      recipientUserId: 5,
-      sourceDeviceId: 100,
+      recipientMemberId: memberIds[role],
+      sourceMemberId: memberIds[role],
       message:
         '[12:00:00] Your approximate location is now being shared with hunters and spectators because you remained too close to another participant. Please move apart.',
     };
@@ -505,8 +516,8 @@ try {
     const unrelated = {
       ...personal,
       id: personal.id + '-other',
-      recipientUserId: 6,
-      sourceDeviceId: 101,
+      recipientMemberId: 99,
+      sourceMemberId: 99,
     };
     await emit([unrelated]);
     await synchronize();
@@ -519,49 +530,36 @@ try {
   await synchronize();
   assert.equal(await soundCount(), expectedSounds);
   assert.ok(!(await historyIds()).includes(anotherUser.id));
-  const reassigned = {
-    ...(await makeAlert('private-reassigned')),
+  // A tracker replacement keeps the member, its personal history and its handled alerts.
+  await page.evaluate(() => window.notificationAudit.replaceTracker());
+  await synchronize();
+  assert.ok((await historyIds()).includes('personal-liveTrackingStarted'));
+  assert.equal(await soundCount(), expectedSounds, 'a tracker replacement cannot replay alerts');
+  const replaced = {
+    ...(await makeAlert('private-replaced')),
     type: 'liveTrackingStarted',
     audience: 'user',
-    recipientUserId: 5,
-    sourceDeviceId: 101,
-    message: '[12:00:00] Live ping started for your newly assigned tracker.',
+    recipientMemberId: memberIds.player,
+    sourceMemberId: memberIds.player,
+    message: '[12:00:00] Live ping started for your replaced tracker.',
   };
-  await emit([reassigned]);
-  await synchronize();
-  assert.ok(!(await historyIds()).includes(reassigned.id));
-  assert.equal(await soundCount(), expectedSounds);
-  await page.evaluate(() => window.notificationAudit.setAssignedDevice(101));
-  await banner.getByText(reassigned.message).waitFor();
+  await emit([replaced]);
+  await banner.getByText(replaced.message).waitFor();
   assert.equal(await soundCount(), ++expectedSounds);
-  assert.ok(!(await historyIds()).includes('personal-liveTrackingStarted'));
-  await page.evaluate(() => window.notificationAudit.setAssignedDevice(100));
-  await page.waitForFunction(() =>
-    window.notificationAudit.history.items.some(
-      (item) => item.id === 'personal-liveTrackingStarted',
-    ),
-  );
-  await synchronize();
-  assert.equal(
-    await soundCount(),
-    expectedSounds,
-    'reassignment back cannot replay handled personal alerts',
-  );
-  assert.ok(!(await historyIds()).includes(reassigned.id));
   const permissionReceived = {
     ...(await makeAlert('permission-received')),
     type: 'livePingReceived',
     audience: 'livePlayer',
-    recipientUserId: 5,
-    sourceDeviceId: 200,
+    recipientMemberId: memberIds.player,
+    sourceMemberId: 20,
     message: '[12:00:00] Live ping from Bob is being received.',
   };
   const permissionPersonal = {
     ...(await makeAlert('permission-personal')),
     type: 'liveTrackingStarted',
     audience: 'user',
-    recipientUserId: 5,
-    sourceDeviceId: 100,
+    recipientMemberId: memberIds.player,
+    sourceMemberId: memberIds.player,
     message: '[12:00:00] Your private live ping started.',
   };
   await emit([permissionReceived]);
@@ -570,33 +568,24 @@ try {
   await emit([permissionPersonal]);
   await banner.getByText(permissionPersonal.message).waitFor();
   assert.equal(await soundCount(), ++expectedSounds);
-  await page.evaluate(() => window.notificationAudit.setTrackerAccess(false));
-  await page.waitForFunction(
-    () => window.notificationAudit.history.personalSourceDeviceId === null,
-  );
-  await synchronize();
+  // Unbinding the account (no membership: 403) clears the active history and banner; binding it
+  // again restores the cached history without replaying handled alerts.
+  await page.evaluate(() => window.notificationAudit.setRole('unrelated'));
+  await page.waitForFunction(() => window.notificationAudit.history.key === null);
   await page.clock.fastForward(400);
-  assert.equal(
-    await banner.count(),
-    0,
-    'revoking tracker access removes the active private banner',
-  );
-  assert.ok(
-    (await historyIds()).includes(permissionReceived.id),
-    'destination history is not personal tracker history',
-  );
-  assert.ok(!(await historyIds()).includes(permissionPersonal.id));
-  await page.evaluate(() => window.notificationAudit.setTrackerAccess(true));
+  assert.equal(await banner.count(), 0, 'losing the membership removes the active private banner');
+  await page.evaluate(() => window.notificationAudit.setRole('player'));
   await page.waitForFunction(() =>
     window.notificationAudit.history.items.some((item) => item.id === 'permission-personal'),
   );
   await synchronize();
+  assert.ok((await historyIds()).includes(permissionReceived.id));
   assert.equal(
     await banner.count(),
     0,
-    'restoring access cannot revive a dismissed/unauthorized banner',
+    'binding again cannot revive a dismissed/unauthorized banner',
   );
-  assert.equal(await soundCount(), expectedSounds, 'restoring access cannot replay handled sounds');
+  assert.equal(await soundCount(), expectedSounds, 'binding again cannot replay handled sounds');
   const anonymousPing = {
     ...(await makeAlert('speedhunt-anonymous')),
     audience: 'nonHunters',
@@ -610,9 +599,9 @@ try {
   };
   for (const role of ['player', 'supporter', 'hunter', 'spectator']) {
     await page.evaluate(
-      ({ role, records }) => {
-        window.notificationAudit.setRole(role);
-        window.notificationAudit.reset(900, records);
+      async ({ role, records }) => {
+        await window.notificationAudit.setRole(role);
+        window.notificationAudit.reset(3, records);
       },
       { role, records: [anonymousPing, hunterPing] },
     );
@@ -645,17 +634,17 @@ try {
       ...(await makeAlert('recipient-' + role)),
       type: 'livePingReceived',
       audience,
-      recipientUserId: 5,
-      sourceDeviceId: 200,
+      recipientMemberId: memberIds[role],
+      sourceMemberId: 20,
       message:
         '[12:00:00] Live ping from Älice is now being sent to Tschugger. Reason: Usage of public transport.',
     };
     await page.evaluate(
-      ({ role, records }) => {
-        window.notificationAudit.setRole(role);
-        window.notificationAudit.reset(900, records);
+      async ({ role, records }) => {
+        await window.notificationAudit.setRole(role);
+        window.notificationAudit.reset(3, records);
       },
-      { role, records: [received, { ...received, id: 'other-recipient', recipientUserId: 6 }] },
+      { role, records: [received, { ...received, id: 'other-recipient', recipientMemberId: 99 }] },
     );
     await banner.getByText(received.message).waitFor();
     await waitForHistory(1);
@@ -666,7 +655,9 @@ try {
     assert.equal(await soundCount(), expectedSounds);
     await page.evaluate(() => window.notificationAudit.flushHistory());
     await page.reload();
-    await page.waitForFunction(() => window.notificationAudit?.sockets > 0);
+    await page.waitForFunction(
+      () => window.notificationAudit?.sockets > 0 && Boolean(window.notificationAudit.member),
+    );
     await waitForHistory(1);
     assert.equal(await soundCount(), 0, 'recipient cache hydration cannot replay sound');
     expectedSounds = 0;

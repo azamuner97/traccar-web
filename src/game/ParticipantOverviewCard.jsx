@@ -12,7 +12,7 @@ import {
 import { participantOverviewView } from './gameView';
 import useGameTranslation from './useGameTranslation';
 
-const ParticipantOverviewCard = ({ status, ownDeviceId }) => {
+const ParticipantOverviewCard = ({ status, ownMemberId }) => {
   const t = useGameTranslation();
   const participants = participantOverviewView(status);
   const caught = participants.filter((item) => item.caught).length;
@@ -36,13 +36,13 @@ const ParticipantOverviewCard = ({ status, ownDeviceId }) => {
               item.role === 'player' ? 'gameParticipantPlayer' : 'gameParticipantSupporter',
             );
             return (
-              <Fragment key={item.deviceId}>
+              <Fragment key={item.memberId}>
                 {index > 0 && <Divider component="li" />}
                 <ListItem sx={{ gap: 1.5 }}>
                   <ListItemText
                     primary={item.name}
                     secondary={
-                      item.deviceId === ownDeviceId ? `${role} · ${t('gameParticipantYou')}` : role
+                      item.memberId === ownMemberId ? `${role} · ${t('gameParticipantYou')}` : role
                     }
                     sx={{ minWidth: 0, overflowWrap: 'anywhere' }}
                   />

@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useSelector } from 'react-redux';
 import {
   Button,
@@ -24,10 +24,10 @@ import {
   canCancelRequest,
   formatClock,
   formatCountdown,
-  gameAccountKey,
   inventoryByType,
   isOpenRequest,
   jokerAvailability,
+  ownFakeRunTokens,
   plannedBreaksView,
   remainingMs,
   requestGameSync,
@@ -46,6 +46,7 @@ import ParticipantOverviewCard from './ParticipantOverviewCard';
 import FakePlanDialog from './FakePlanDialog';
 import BreakPlanDialog from './BreakPlanDialog';
 import { capitalized, requestStateColors } from './gameText';
+import { ownTrackerId } from '../main/gameMap';
 
 const jokerLabels = {
   hunterPositions: 'gameJokerHunterPositions',
@@ -237,7 +238,7 @@ const reservationText = (t, item) => {
   if (item.kind === 'bound') {
     const label =
       item.use === 'runningSpeedhunt' ? 'gameReservationUsedRunning' : 'gameReservationBound';
-    return t(label, { time: formatClock(item.boundAt), number: item.pingNumber });
+    return t(label, { number: item.pingNumber });
   }
   if (item.type === 'break') {
     return t('gameReservationArmedBreak', { time: formatClock(item.startsAt) });
@@ -308,7 +309,7 @@ const ReservationsCard = ({ reservations, onCancel, busy }) => {
   );
 };
 
-const RequestsCard = ({ requests, userId, offsetMs, now, onCancel, busy }) => {
+const RequestsCard = ({ requests, memberId, offsetMs, now, onCancel, busy }) => {
   const t = useGameTranslation();
   return (
     <Card variant="outlined">
@@ -329,7 +330,7 @@ const RequestsCard = ({ requests, userId, offsetMs, now, onCancel, busy }) => {
             ]
               .filter(Boolean)
               .join(' · ');
-            const cancellable = canCancelRequest(request, userId);
+            const cancellable = canCancelRequest(request, memberId);
             return (
               <Fragment key={request.id}>
                 {index > 0 && <Divider component="li" />}
@@ -376,15 +377,16 @@ const RequestsCard = ({ requests, userId, offsetMs, now, onCancel, busy }) => {
 
 /**
  * A player's or supporter's own game: break, jokers, own timetable pings, reservations and plans
- * (fakes are planned on a map), and requests.
+ * (fakes are planned on a map), and requests. `membership` is the member /api/game-status names.
  */
-const ParticipantGameView = ({ game, user }) => {
+const ParticipantGameView = ({ game, membership }) => {
   const t = useGameTranslation();
   const now = useNow();
   const socket = useSelector((state) => state.session.socket);
-  const ownPosition = useSelector(
-    (state) => state.session.positions[user.attributes?.traccarToolAssignedDeviceId],
-  );
+  // The fake picker starts at the member's own tracker, found by its role marker.
+  const devices = useSelector((state) => state.devices.items);
+  const ownDeviceId = useMemo(() => ownTrackerId(devices, membership), [devices, membership]);
+  const ownPosition = useSelector((state) => state.session.positions[ownDeviceId]);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(null);
   const [planning, setPlanning] = useState(null);
@@ -395,17 +397,26 @@ const ParticipantGameView = ({ game, user }) => {
   const inventory = inventoryByType(game.jokers);
   const requests = sortedRequests(game.requests);
   const cancellableRequestIds = new Set(
-    requests.filter((item) => canCancelRequest(item, user.id)).map((item) => item.id),
+    requests.filter((item) => canCancelRequest(item, membership.memberId)).map((item) => item.id),
   );
-  const reservations = reservationsView(game.jokers, cancellableRequestIds);
+  const reservations = reservationsView(
+    game.jokers,
+    cancellableRequestIds,
+    ownFakeRunTokens(status),
+  );
   const breakStatus = breakView(status.break, game.offsetMs, now);
-  const plannedBreaks = plannedBreaksView(reservations, game.offsetMs, now);
+  const plannedBreaks = plannedBreaksView(
+    status,
+    requests,
+    game.offsetMs,
+    now,
+    cancellableRequestIds,
+  );
   // The member's own break marks their own pings inside it (no fake can be planned there).
-  const ownDeviceId = Number(user.attributes?.traccarToolAssignedDeviceId);
   const pings = timetableView(game.timetable, {
     participants: [
       {
-        deviceId: ownDeviceId,
+        memberId: membership.memberId,
         caught: false,
         break: breakStatus,
       },
@@ -495,7 +506,7 @@ const ParticipantGameView = ({ game, user }) => {
   const cancelPlan = (item) =>
     item.kind === 'held'
       ? cancelRequest(item.requestId)
-      : cancel(`/api/game-jokers/reservations/${item.id}/cancel`);
+      : cancel(`/api/game-jokers/reservations/${item.reservationId}/cancel`);
 
   return (
     <>
@@ -523,13 +534,11 @@ const ParticipantGameView = ({ game, user }) => {
             : undefined
         }
       />
-      {game.key === gameAccountKey(user) && (
-        <ParticipantOverviewCard status={status} ownDeviceId={ownDeviceId} />
-      )}
+      <ParticipantOverviewCard status={status} ownMemberId={membership.memberId} />
       <ReservationsCard reservations={reservations} busy={busy} onCancel={cancelPlan} />
       <RequestsCard
         requests={requests}
-        userId={user.id}
+        memberId={membership.memberId}
         offsetMs={game.offsetMs}
         now={now}
         busy={busy}

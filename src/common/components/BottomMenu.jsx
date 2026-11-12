@@ -24,7 +24,7 @@ import { useRestriction } from '../util/permissions';
 import { nativePostMessage } from './NativeInterface';
 import fetchOrThrow from '../util/fetchOrThrow';
 import { removeNotificationToken } from '../util/notificationTokens';
-import { gameRole } from '../../game/gameView';
+import useGameMembership from '../../game/useGameMembership';
 import useGameTranslation from '../../game/useGameTranslation';
 
 const BottomMenu = () => {
@@ -43,7 +43,8 @@ const BottomMenu = () => {
 
   const [anchorEl, setAnchorEl] = useState(null);
   // Every game member has a Game page: players and supporters manage their jokers, hunters the speedhunts.
-  const showGame = Boolean(gameRole(user));
+  // Membership comes from /api/game-status.
+  const showGame = Boolean(useGameMembership());
 
   const currentSelection = () => {
     if (location.pathname === `/settings/user/${user.id}`) {

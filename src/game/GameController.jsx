@@ -1,14 +1,15 @@
 import { useEffect, useRef } from 'react';
-import { useDispatch, useSelector } from 'react-redux';
+import { useDispatch, useSelector, useStore } from 'react-redux';
 import { gameActions } from '../store';
 import fetchOrThrow from '../common/util/fetchOrThrow';
 import createRefreshScheduler from '../common/util/refreshScheduler';
 import {
   GAME_INVALIDATIONS,
   gameAccountKey,
-  gameRole,
+  gameMemberKey,
   readsJokers,
   listenGameSync,
+  selectGameMembership,
   serverOffsetMs,
   validGameJokers,
   validGameStatus,
@@ -20,18 +21,20 @@ const DISCONNECTED_REFRESH_MS = 5000;
 const CONNECTED_REFRESH_MS = 30000;
 
 /**
- * Keeps the game store current for a generated game account: on sign-in, on the server's game
- * invalidations and reconnects (through requestGameSync), when the app returns to the foreground,
- * and periodically as a fallback.
+ * Keeps the game store current for every signed-in account except administrators. Membership comes only from
+ * /api/game-status (403 means none); the member's requests, jokers and timetable are read once the status names
+ * a member, and again on the server's game invalidations and reconnects (through requestGameSync), when the app
+ * returns to the foreground, and periodically as a fallback. Accounts without membership keep asking at the same
+ * interval, so a membership bound later shows up.
  */
 const GameController = () => {
   const dispatch = useDispatch();
+  const store = useStore();
   const user = useSelector((state) => state.session.user);
   const socket = useSelector((state) => state.session.socket);
   const socketRef = useRef(socket);
   socketRef.current = socket;
   const key = gameAccountKey(user);
-  const role = gameRole(user);
 
   useEffect(() => {
     dispatch(gameActions.reset(key));
@@ -42,30 +45,16 @@ const GameController = () => {
     const controller = new AbortController();
     let lastLoad = 0;
     const options = { signal: controller.signal };
-    const statusScheduler = createRefreshScheduler({
-      load: async () => {
-        lastLoad = Date.now();
-        const response = await fetchOrThrow('/api/game-status', { ...options, cache: 'no-store' });
-        const receivedAt = Date.now();
-        const status = await response.json();
-        if (!validGameStatus(status)) throw new Error('Invalid game status');
-        return {
-          status,
-          offsetMs: serverOffsetMs(status.serverTime, receivedAt),
-          refreshedAt: receivedAt,
-        };
-      },
-      apply: (payload) => dispatch(gameActions.refreshStatus({ key, ...payload })),
-      fail: (error) => {
-        if (error.name !== 'AbortError')
-          dispatch(gameActions.statusFailed({ key, message: error.message }));
-      },
-    });
+    const membership = () => selectGameMembership(store.getState());
     const detailsScheduler = createRefreshScheduler({
       load: async () => {
+        const member = membership();
+        if (!member) return null;
         const [requestsResponse, jokersResponse, timetableResponse] = await Promise.all([
           fetchOrThrow(`/api/game-requests?limit=${REQUEST_LIMIT}`, options),
-          readsJokers(role) ? fetchOrThrow('/api/game-jokers', options) : Promise.resolve(null),
+          readsJokers(member.role)
+            ? fetchOrThrow('/api/game-jokers', options)
+            : Promise.resolve(null),
           fetchOrThrow('/api/game-timetable', options),
         ]);
         const requests = await requestsResponse.json();
@@ -78,17 +67,56 @@ const GameController = () => {
         ) {
           throw new Error('Invalid game response');
         }
-        return { requests, jokers, timetable };
+        return { memberKey: gameMemberKey(member), requests, jokers, timetable };
       },
-      apply: (payload) => dispatch(gameActions.refresh({ key, ...payload })),
+      apply: (payload) => {
+        if (payload) dispatch(gameActions.refresh({ key, ...payload }));
+      },
       fail: (error) => {
         if (error.name !== 'AbortError')
-          dispatch(gameActions.failed({ key, message: error.message }));
+          dispatch(
+            gameActions.failed({
+              key,
+              memberKey: gameMemberKey(membership()),
+              message: error.message,
+            }),
+          );
+      },
+    });
+    const statusScheduler = createRefreshScheduler({
+      load: async () => {
+        lastLoad = Date.now();
+        const response = await fetch('/api/game-status', { ...options, cache: 'no-store' });
+        if (response.status === 403) return { member: false };
+        if (!response.ok) {
+          throw new Error((await response.text()) || `Game status failed (${response.status})`);
+        }
+        const receivedAt = Date.now();
+        const status = await response.json();
+        if (!validGameStatus(status)) throw new Error('Invalid game status');
+        return {
+          member: true,
+          status,
+          offsetMs: serverOffsetMs(status.serverTime, receivedAt),
+          refreshedAt: receivedAt,
+        };
+      },
+      apply: ({ member, ...payload }) => {
+        const before = gameMemberKey(membership());
+        if (member) dispatch(gameActions.refreshStatus({ key, ...payload }));
+        else dispatch(gameActions.noMembership({ key }));
+        const after = gameMemberKey(membership());
+        // A new member (or the first status) needs its own details at once.
+        if (after && after !== before) detailsScheduler.schedule();
+      },
+      fail: (error) => {
+        if (error.name !== 'AbortError')
+          dispatch(gameActions.statusFailed({ key, message: error.message }));
       },
     });
     const schedule = () => {
       statusScheduler.schedule();
-      detailsScheduler.schedule();
+      if (membership()) detailsScheduler.schedule();
     };
     const unsubscribe = listenGameSync((resources) => {
       if (!resources || resources.some((resource) => GAME_INVALIDATIONS.includes(resource))) {
@@ -114,7 +142,7 @@ const GameController = () => {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('focus', onVisibility);
     };
-  }, [dispatch, key, role]);
+  }, [dispatch, store, key]);
 
   return null;
 };

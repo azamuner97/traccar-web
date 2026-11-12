@@ -14,13 +14,15 @@ import {
   fillText,
   formatCountdown,
   gameAccountKey,
-  gameRole,
+  gameMemberKey,
+  gameMembership,
   holdsJokers,
   inventoryByType,
   isGameInvalidation,
   jokerAvailability,
   listenGameSync,
   localDateTimeInput,
+  ownFakeRunTokens,
   participantOverviewView,
   participantsView,
   plannedBreaksView,
@@ -30,6 +32,7 @@ import {
   readsJokers,
   reservationsView,
   runningFakeChoice,
+  selectGameMembership,
   selectedRunningFakeChoice,
   serverOffsetMs,
   sortedRequests,
@@ -41,35 +44,43 @@ import {
   validGameStatus,
 } from './gameView.js';
 
-const user = (role, extra = {}) => ({
-  id: 7,
-  attributes: {
-    traccarToolUserRole: role,
-    traccarToolSessionDeviceId: 900,
-    traccarToolAssignedDeviceId: 11,
-  },
-  ...extra,
+const user = (extra = {}) => ({ id: 7, attributes: {}, ...extra });
+// The computed status of /api/game-status; it names the account's membership.
+const gameStatus = (role, changes = {}) => ({
+  gameSessionId: 3,
+  memberId: 40,
+  role,
+  number: 1,
+  displayName: 'Member',
+  controllerActive: true,
+  serverTime: '2026-11-09T12:00:00Z',
+  hash: '0123456789abcdef0123456789abcdef',
+  status: {},
+  ...changes,
 });
 
-test('hunter live shares follow the current account, controller and server-clock deadline', () => {
-  const hunter = user('hunter');
-  const always = { deviceId: 11, name: 'Player 1' };
-  const timed = { deviceId: 12, name: 'Player 2', endsAt: '2026-11-10T10:00:00Z' };
+test('hunter live shares follow the current account, member, controller and server-clock deadline', () => {
+  const hunter = user();
+  const always = { memberId: 11, name: 'Player 1' };
+  const timed = { memberId: 12, name: 'Player 2', endsAt: '2026-11-10T10:00:00Z' };
   const now = Date.parse(timed.endsAt) - 5000;
   const game = {
     key: gameAccountKey(hunter),
     offsetMs: 3000,
-    status: {
-      role: 'hunter',
-      controllerActive: true,
-      status: { liveShares: [always, timed, { ...timed, endsAt: 'invalid' }] },
-    },
+    status: gameStatus('hunter', {
+      status: {
+        liveShares: [always, timed, { ...timed, endsAt: 'invalid' }, { ...always, memberId: 0 }],
+      },
+    }),
   };
 
   assert.deepEqual(activeHunterLiveShares(game, hunter, now), [always, timed]);
   assert.deepEqual(activeHunterLiveShares(game, hunter, now + 2000), [always]);
-  assert.deepEqual(activeHunterLiveShares(game, user('spectator'), now), []);
-  assert.deepEqual(activeHunterLiveShares(game, user('hunter', { id: 8 }), now), []);
+  assert.deepEqual(
+    activeHunterLiveShares({ ...game, status: { ...game.status, role: 'spectator' } }, hunter, now),
+    [],
+  );
+  assert.deepEqual(activeHunterLiveShares(game, user({ id: 8 }), now), []);
   assert.deepEqual(
     activeHunterLiveShares({ ...game, error: 'timetable unavailable' }, hunter, now),
     [always, timed],
@@ -77,22 +88,24 @@ test('hunter live shares follow the current account, controller and server-clock
   assert.deepEqual(activeHunterLiveShares({ ...game, statusError: 'offline' }, hunter, now), []);
   const inactive = { ...game, status: { ...game.status, controllerActive: false } };
   assert.deepEqual(activeHunterLiveShares(inactive, hunter, now), []);
+  assert.deepEqual(activeHunterLiveShares({ ...game, status: null }, hunter, now), []);
 });
 const at = (iso) => Date.parse(iso);
 
 test('the catch roster sorts each group by name and reads only explicit player and supporter status', () => {
-  const anna = { deviceId: 11, name: 'Anna', role: 'player', caught: true };
-  const ben = { deviceId: 12, name: 'Ben', role: 'supporter', caught: false };
-  const cleo = { deviceId: 13, name: 'Cleo', role: 'player', caught: false };
-  const dana = { deviceId: 14, name: 'Dana', role: 'supporter', caught: true };
+  const anna = { memberId: 11, number: 1, name: 'Anna', role: 'player', caught: true };
+  const ben = { memberId: 12, number: 1, name: 'Ben', role: 'supporter', caught: false };
+  const cleo = { memberId: 13, number: 2, name: 'Cleo', role: 'player', caught: false };
+  const dana = { memberId: 14, number: 2, name: 'Dana', role: 'supporter', caught: true };
   const status = {
     participantOverview: [
       cleo,
       dana,
-      { deviceId: 15, name: 'Hunter', role: 'hunter', caught: false },
-      { deviceId: 16, name: 'Unknown', role: 'player' },
+      { memberId: 15, name: 'Hunter', role: 'hunter', caught: false },
+      { memberId: 16, name: 'Unknown', role: 'player' },
       anna,
       ben,
+      { deviceId: 17, name: 'Device only', role: 'player', caught: false },
     ],
   };
 
@@ -120,12 +133,34 @@ test('live shares always show a reason and retain the geofence cause', () => {
   assert.equal(liveShareReason(t, {}), 'gameLiveShareNoReason');
 });
 
-test('only generated game accounts have a game role; players and supporters hold jokers', () => {
-  assert.equal(gameRole(user('player')), 'player');
-  assert.equal(gameRole(user('spectator')), 'spectator');
-  assert.equal(gameRole(user('player', { administrator: true })), null);
-  assert.equal(gameRole(user('operator')), null);
-  assert.equal(gameRole(null), null);
+test('membership comes only from the computed status; players and supporters hold jokers', () => {
+  const game = { key: '7', status: gameStatus('player', { number: 2 }) };
+  assert.deepEqual(gameMembership(user(), game), {
+    userId: 7,
+    gameSessionId: 3,
+    memberId: 40,
+    role: 'player',
+    number: 2,
+  });
+  assert.deepEqual(
+    selectGameMembership({ session: { user: user() }, game }),
+    gameMembership(user(), game),
+  );
+  assert.equal(gameMembership(user({ administrator: true }), game), null, 'administrators');
+  assert.equal(gameMembership(user({ id: 8 }), game), null, 'another account');
+  assert.equal(gameMembership(user(), { key: '7', status: null }), null, 'no membership');
+  assert.equal(gameMembership(null, game), null);
+  for (const changes of [{ role: 'operator' }, { memberId: 0 }, { gameSessionId: null }]) {
+    assert.equal(gameMembership(user(), { key: '7', status: gameStatus('player', changes) }), null);
+  }
+  const legacy = user({
+    attributes: {
+      traccarToolUserRole: 'player',
+      traccarToolSessionDeviceId: 900,
+      traccarToolAssignedDeviceId: 11,
+    },
+  });
+  assert.equal(gameMembership(legacy, { key: '7', status: null }), null, 'attributes are ignored');
   assert.deepEqual(['player', 'supporter', 'hunter', 'spectator'].map(holdsJokers), [
     true,
     true,
@@ -134,19 +169,22 @@ test('only generated game accounts have a game role; players and supporters hold
   ]);
 });
 
-test('the account key changes with the account, role and assignment', () => {
-  const key = gameAccountKey(user('player'));
-  assert.notEqual(key, gameAccountKey(user('supporter')));
-  assert.notEqual(key, gameAccountKey({ ...user('player'), id: 8 }));
-  assert.notEqual(
-    key,
-    gameAccountKey(
-      user('player', {
-        attributes: { ...user('player').attributes, traccarToolAssignedDeviceId: 12 },
-      }),
-    ),
-  );
-  assert.equal(gameAccountKey(user('player', { administrator: true })), null);
+test('the account key names every signed-in account except administrators', () => {
+  assert.equal(gameAccountKey(user()), '7');
+  assert.notEqual(gameAccountKey(user()), gameAccountKey(user({ id: 8 })));
+  assert.equal(gameAccountKey(user({ administrator: true })), null);
+  assert.equal(gameAccountKey(null), null);
+  assert.equal(gameAccountKey(user({ id: 0 })), null);
+});
+
+test('the member key identifies session, member and role', () => {
+  const key = gameMemberKey(gameStatus('player'));
+  assert.equal(key, gameMemberKey({ gameSessionId: 3, memberId: 40, role: 'player' }));
+  assert.notEqual(key, gameMemberKey(gameStatus('supporter')));
+  assert.notEqual(key, gameMemberKey(gameStatus('player', { memberId: 41 })));
+  assert.notEqual(key, gameMemberKey(gameStatus('player', { gameSessionId: 4 })));
+  assert.equal(gameMemberKey(null), null);
+  assert.equal(gameMemberKey(gameStatus('operator')), null);
 });
 
 test('game invalidations and reconnects ask for a sync', () => {
@@ -231,47 +269,70 @@ test('reservations: cancel held plans and armed fakes through delivery', () => {
   const view = reservationsView(
     {
       reservations: [
-        { id: 1, type: 'fakePing', requestId: 40, armed: false, plan: { pingNumber: 3 } },
+        {
+          id: 1,
+          type: 'fakePing',
+          requestId: 40,
+          status: 'reserved',
+          armed: false,
+          use: 'speedhunt',
+          fake: { latitude: 47, longitude: 8, pingNumber: 3, bound: false },
+        },
         {
           id: 2,
           type: 'fakePing',
           use: 'timetable',
+          status: 'reserved',
           armed: true,
-          bound: false,
-          plan: {
+          fake: {
             entryId: 40,
             scheduledAt: '2026-11-09T12:00:50Z',
             latitude: 47.1,
             longitude: 8.5,
+            bound: false,
           },
         },
         {
           id: 3,
           type: 'fakePing',
+          status: 'reserved',
           armed: true,
-          bound: false,
-          plan: {
+          fake: {
             entryId: 41,
             scheduledAt: '2026-11-09T12:30:00Z',
             latitude: 47.2,
             longitude: 8.6,
+            bound: false,
           },
         },
-        { id: 4, type: 'fakePing', armed: true, bound: false, plan: { pingNumber: 2 } },
+        {
+          id: 4,
+          type: 'fakePing',
+          use: 'runningSpeedhunt',
+          status: 'reserved',
+          armed: true,
+          fake: { latitude: 47, longitude: 8, pingNumber: 2, bound: false },
+        },
         {
           id: 5,
           type: 'fakePing',
           use: 'speedhunt',
-          armed: false,
-          bound: true,
           status: 'consumed',
-          plan: { pingNumber: 1, boundAt: '2026-11-09T11:50:00Z' },
+          armed: false,
+          fake: { latitude: 47, longitude: 8, pingNumber: 1, bound: true },
         },
         { id: 'x', type: 'fakePing' },
-        { id: 6, type: 'fakeTimetable', armed: true, plan: { entryId: 42 } },
+        { id: 6, type: 'fakeTimetable', armed: true, fake: { entryId: 42 } },
       ],
     },
     new Set([40]),
+    ownFakeRunTokens({
+      fakes: [
+        { reservationId: 4, use: 'runningSpeedhunt', runToken: 'a'.repeat(32) },
+        { reservationId: 2, use: 'timetable' },
+        { reservationId: 7, runToken: 'bad' },
+      ],
+    }),
   );
   assert.deepEqual(
     view.map((item) => [item.id, item.kind, item.cancellable]),
@@ -284,18 +345,21 @@ test('reservations: cancel held plans and armed fakes through delivery', () => {
     ],
   );
   assert.equal(view[0].latitude, 47.1);
-  assert.equal(view[4].boundAt, '2026-11-09T11:50:00Z');
+  assert.equal(view[0].reservationId, 2);
+  assert.equal(view[2].runToken, 'a'.repeat(32), 'the run token comes from the status');
+  assert.equal(view[0].runToken, null);
+  assert.equal(view[4].pingNumber, 1);
   assert.deepEqual(
     view.map((item) => item.use),
-    ['timetable', 'timetable', 'speedhunt', 'speedhunt', 'speedhunt'],
+    ['timetable', 'timetable', 'runningSpeedhunt', 'speedhunt', 'speedhunt'],
     'the use comes from the server or from the plan',
   );
 });
 
 test('requests: newest first, approval state and own cancellation', () => {
   const requests = sortedRequests([
-    { id: 3, status: 'pending', approvalRequired: true, requesterUserId: 7 },
-    { id: 5, status: 'succeeded', requesterUserId: 7 },
+    { id: 3, status: 'pending', approvalRequired: true, requesterMemberId: 40 },
+    { id: 5, status: 'succeeded', requesterMemberId: 40 },
     { id: 'bad' },
   ]);
   assert.deepEqual(
@@ -304,9 +368,10 @@ test('requests: newest first, approval state and own cancellation', () => {
   );
   assert.equal(requestState(requests[1]), 'awaitingApproval');
   assert.equal(requestState({ status: 'pending' }), 'pending');
-  assert.ok(canCancelRequest(requests[1], 7));
-  assert.ok(!canCancelRequest(requests[1], 8));
-  assert.ok(!canCancelRequest(requests[0], 7));
+  assert.ok(canCancelRequest(requests[1], 40));
+  assert.ok(!canCancelRequest(requests[1], 41));
+  assert.ok(!canCancelRequest(requests[1], null));
+  assert.ok(!canCancelRequest(requests[0], 40));
 });
 
 test('joker availability never depends on whom a speedhunt targets', () => {
@@ -360,38 +425,80 @@ test('joker availability never depends on whom a speedhunt targets', () => {
   );
 });
 
-test('planned breaks: listed by start, cancellable while held or armed, requested now or later', () => {
+test('planned breaks: from the status and open requests, cancellable while held or armed', () => {
   const now = at('2026-11-09T12:00:00Z');
-  const reservations = reservationsView(
+  const status = {
+    plannedBreaks: [
+      {
+        breakId: 1,
+        reservationId: 21,
+        startsAt: '2026-11-09T13:00:00Z',
+        state: 'planned',
+        plannedBy: 'participant',
+      },
+      {
+        breakId: 3,
+        reservationId: 23,
+        startsAt: '2026-11-09T11:55:00Z',
+        state: 'waiting',
+        plannedBy: 'participant',
+      },
+      {
+        breakId: 4,
+        reservationId: null,
+        startsAt: '2026-11-09T14:00:00Z',
+        state: 'planned',
+        plannedBy: 'operator',
+      },
+      { breakId: 5, startsAt: '2026-11-09T15:00:00Z', state: 'active' },
+      { breakId: 6, startsAt: 'bad', state: 'planned' },
+    ],
+  };
+  const requests = [
     {
-      reservations: [
-        { id: 1, type: 'break', armed: true, plan: { startsAt: '2026-11-09T13:00:00Z' } },
-        { id: 2, type: 'break', requestId: 9, plan: { startsAt: '2026-11-09T12:30:00Z' } },
-        { id: 3, type: 'break', armed: true, plan: { startsAt: '2026-11-09T11:55:00Z' } },
-        { id: 4, type: 'break', requestId: 10, plan: {} },
-      ],
+      id: 9,
+      type: 'jokerBreak',
+      status: 'pending',
+      parameters: { startsAt: '2026-11-09T12:30:00Z' },
     },
-    new Set([9]),
-  );
-  assert.equal(
-    reservations.find((item) => item.id === 4).startsAt,
-    null,
-    'a break that starts now',
-  );
+    { id: 10, type: 'jokerBreak', status: 'pending', parameters: {} },
+    {
+      id: 11,
+      type: 'jokerBreak',
+      status: 'succeeded',
+      parameters: { startsAt: '2026-11-09T12:40:00Z' },
+    },
+    {
+      id: 12,
+      type: 'jokerFakePing',
+      status: 'pending',
+      parameters: { startsAt: '2026-11-09T12:45:00Z' },
+    },
+  ];
+  const view = plannedBreaksView(status, requests, 0, now, new Set([9]));
   assert.deepEqual(
-    plannedBreaksView(reservations, 0, now).map((item) => [
-      item.id,
-      item.kind,
-      item.due,
-      item.cancellable,
-    ]),
+    view.map((item) => [item.id, item.kind, item.due, item.cancellable]),
     [
-      [3, 'armed', true, true],
-      [2, 'held', false, true],
-      [1, 'armed', false, true],
+      ['break:3', 'armed', true, true],
+      ['request:9', 'held', false, true],
+      ['break:1', 'armed', false, true],
+      ['break:4', 'armed', false, false],
     ],
   );
-  assert.equal(plannedBreaksView(reservations, 0, now)[2].remainingMs, 3600000);
+  assert.equal(view[2].reservationId, 21);
+  assert.equal(view[1].requestId, 9);
+  assert.equal(view[2].remainingMs, 3600000);
+  assert.equal(
+    plannedBreaksView(
+      { plannedBreaks: [{ ...status.plannedBreaks[0], state: 'waiting' }] },
+      [],
+      0,
+      now,
+    )[0].due,
+    true,
+    'a waiting break starts as soon as possible',
+  );
+  assert.deepEqual(plannedBreaksView({}, [], 0, now), []);
   assert.deepEqual(breakRequest({ when: 'now' }), { type: 'jokerBreak' });
   const later = breakRequest({ when: 'later', time: localDateTimeInput(now + 3600000) });
   assert.equal(later.type, 'jokerBreak');
@@ -402,15 +509,22 @@ test('planned breaks: listed by start, cancellable while held or armed, requeste
 });
 
 test('answers are validated and texts filled', () => {
-  assert.ok(
-    validGameStatus({
-      role: 'player',
-      controllerActive: false,
-      serverTime: '2026-11-09T12:00:00Z',
-      status: { speedhunt: { active: false } },
-    }),
-  );
-  assert.ok(!validGameStatus({ role: 'player', controllerActive: false, status: {} }));
+  const valid = gameStatus('player', {
+    controllerActive: false,
+    status: { speedhunt: { active: false } },
+  });
+  assert.ok(validGameStatus(valid));
+  for (const changes of [
+    { serverTime: undefined },
+    { gameSessionId: 0 },
+    { memberId: null },
+    { role: 'operator' },
+    { hash: 'not-a-hash' },
+    { status: null },
+    { controllerActive: 'yes' },
+  ]) {
+    assert.ok(!validGameStatus({ ...valid, ...changes }));
+  }
   assert.ok(validGameJokers({ inventories: [], reservations: [], timetableEntries: [] }));
   assert.ok(!validGameJokers({ inventories: [] }));
   assert.equal(fillText('{a} and {a} of {b}', { a: 1, b: 'x' }), '1 and 1 of x');
@@ -420,15 +534,17 @@ test('answers are validated and texts filled', () => {
 const hunterStatus = {
   participants: [
     {
-      deviceId: 11,
+      memberId: 11,
+      number: 1,
       name: 'Anna',
       role: 'player',
       caught: false,
-      speedhunt: { operation: true, running: true, pings: 2, live: false, revision: 4 },
+      speedhunt: { running: true, pings: 2, live: false, revision: 4 },
       break: { active: false },
     },
     {
-      deviceId: 12,
+      memberId: 12,
+      number: 1,
       name: 'Ben',
       role: 'supporter',
       caught: false,
@@ -442,14 +558,23 @@ const hunterStatus = {
       break: { active: false },
     },
     {
-      deviceId: 13,
+      memberId: 13,
+      number: 2,
       name: 'Cleo',
       role: 'player',
       caught: false,
       speedhunt: { revision: 1 },
       break: { active: true, startedAt: '2026-11-09T11:58:00Z', endsAt: '2026-11-09T12:20:00Z' },
     },
-    { deviceId: 14, name: 'Dan', role: 'player', caught: true, speedhunt: { revision: 1 } },
+    {
+      memberId: 14,
+      number: 3,
+      name: 'Dan',
+      role: 'player',
+      caught: true,
+      speedhunt: { revision: 1 },
+    },
+    { deviceId: 15, name: 'Device only', role: 'player', caught: false },
   ],
 };
 
@@ -489,7 +614,7 @@ test('hunter speedhunt controls offer static and timed live pings', () => {
   assert.equal(speedhuntActions(dan, base).reason, 'caught');
   const open = speedhuntActions(anna, {
     ...base,
-    requests: [{ type: 'speedhuntStaticPing', targetDeviceId: 11, status: 'approved' }],
+    requests: [{ type: 'speedhuntStaticPing', targetMemberId: 11, status: 'approved' }],
   });
   assert.equal(open.speedhuntStaticPing, false);
   assert.equal(open.speedhuntLivePing, false);
@@ -504,7 +629,7 @@ test('a ping that starts a speedhunt needs a joker of the hunters pool', () => {
   const base = { requests: [], controllerActive: true, limits: { fixedLiveMinutes: 5 } };
   const empty = speedhuntPoolView({
     inventories: [
-      { deviceId: 0, type: 'speedhunt', granted: 2, used: 2, reserved: 0, available: 0 },
+      { memberId: null, type: 'speedhunt', granted: 2, used: 2, reserved: 0, available: 0 },
     ],
     reservations: [],
   });
@@ -537,7 +662,7 @@ test('repeat targets use separate static and live approvals and honor hard block
     limitEnforcement: 'warn',
     requestApprovals: { speedhuntStaticPing: true, speedhuntLivePing: false },
   };
-  const base = { requests: [], controllerActive: true, lastSpeedhuntDeviceId: 11, limits };
+  const base = { requests: [], controllerActive: true, lastSpeedhuntMemberId: 11, limits };
   assert.deepEqual(speedhuntActions(participant, base), {
     speedhuntStaticPing: true,
     speedhuntLivePing: false,
@@ -552,7 +677,7 @@ test('repeat targets use separate static and live approvals and honor hard block
   assert.equal(blocked.speedhuntLivePing, false);
   assert.equal(blocked.repeat, true);
   assert.equal(speedhuntActions(anna, base).speedhuntLivePing, true, 'continuation');
-  assert.equal(speedhuntActions(participant, { ...base, lastSpeedhuntDeviceId: 12 }).repeat, false);
+  assert.equal(speedhuntActions(participant, { ...base, lastSpeedhuntMemberId: 12 }).repeat, false);
 });
 
 test('hunter timetable slots collapse simultaneous pings and advance the countdown at the scheduled time', () => {
@@ -560,7 +685,7 @@ test('hunter timetable slots collapse simultaneous pings and advance the countdo
   const slots = [
     { scheduledAt: '2026-11-09T12:05:00Z' },
     { scheduledAt: '2026-11-09T12:00:01Z' },
-    { scheduledAt: '2026-11-09T13:00:01+01:00', deviceId: 11, state: 'sent' },
+    { scheduledAt: '2026-11-09T13:00:01+01:00', memberId: 11, state: 'sent' },
     { scheduledAt: 'bad' },
   ];
   assert.deepEqual(timetableSlotsView(slots, 500, now), [
@@ -576,9 +701,9 @@ test('hunter timetable slots collapse simultaneous pings and advance the countdo
 test('timetable pings show scheduled, due, disconnected, sent, skipped, failed, break and out', () => {
   const now = at('2026-11-09T12:00:00Z');
   const participants = participantsView(hunterStatus, 0, now);
-  const ping = (entryId, deviceId, time, state) => ({
+  const ping = (entryId, memberId, time, state) => ({
     entryId,
-    deviceId,
+    memberId,
     scheduledAt: `2026-11-09T${time}:00Z`,
     state,
     stateAt: null,
@@ -633,7 +758,7 @@ test('timetable pings show scheduled, due, disconnected, sent, skipped, failed, 
 test("a member's own break marks their own pings and allows no fake inside it", () => {
   const now = at('2026-11-09T12:00:00Z');
   const own = {
-    deviceId: 11,
+    memberId: 11,
     caught: false,
     break: breakView(
       { active: true, startedAt: '2026-11-09T11:55:00Z', endsAt: '2026-11-09T12:10:00Z' },
@@ -643,7 +768,7 @@ test("a member's own break marks their own pings and allows no fake inside it", 
   };
   const ping = (entryId, time) => ({
     entryId,
-    deviceId: 11,
+    memberId: 11,
     scheduledAt: `2026-11-09T${time}:00Z`,
     state: 'scheduled',
     stateAt: null,
@@ -722,7 +847,7 @@ test('fakes: valid requests only, ping numbers within the limit, one unbound spe
   assert.equal(fakeUse({ pingNumber: 2 }), 'speedhunt');
   assert.equal(fakeUse({}), null);
   const [own] = reservationsView({
-    reservations: [{ id: 3, type: 'fakePing', armed: true, plan: { entryId: 40 } }],
+    reservations: [{ id: 3, type: 'fakePing', armed: true, fake: { entryId: 40 } }],
   });
   assert.equal(own.entryId, 40);
   assert.equal(own.use, 'timetable');

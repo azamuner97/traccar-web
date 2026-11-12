@@ -1,31 +1,27 @@
 import {
   canReceiveGameAlert,
-  gameAlertSessionDeviceId,
   isGameAlertInWindow,
   isValidGameAlert,
   isLiveRecipientAudience,
 } from './gameAlerts.js';
 
+const positiveId = (value) => (Number.isSafeInteger(value) && value > 0 ? value : null);
+
 export const isNotificationGeneration = (value) =>
   typeof value === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);
 
-export const gameNotificationAccountKey = (origin, user) =>
-  Number.isSafeInteger(user?.id) && user.id > 0 && gameAlertSessionDeviceId(user)
-    ? JSON.stringify([origin, user.id, gameAlertSessionDeviceId(user)])
+/** The journal of a member's session on this server, for the account (membership from /api/game-status). */
+export const gameNotificationAccountKey = (origin, membership) =>
+  positiveId(membership?.userId) && positiveId(membership?.gameSessionId)
+    ? JSON.stringify([origin, membership.userId, membership.gameSessionId])
     : null;
 
-export const gameNotificationHistoryKey = (origin, user, generation) =>
-  gameNotificationAccountKey(origin, user) && isNotificationGeneration(generation)
-    ? JSON.stringify([origin, user.id, gameAlertSessionDeviceId(user), generation])
+export const gameNotificationHistoryKey = (origin, membership, generation) =>
+  gameNotificationAccountKey(origin, membership) && isNotificationGeneration(generation)
+    ? JSON.stringify([origin, membership.userId, membership.gameSessionId, generation])
     : null;
 
-export const retainGameNotificationHistory = (
-  items,
-  user,
-  generation,
-  now = Date.now(),
-  personalSourceDeviceId,
-) => {
+export const retainGameNotificationHistory = (items, membership, generation, now = Date.now()) => {
   const retained = new Map();
   for (const item of Array.isArray(items) ? items : []) {
     if (
@@ -33,7 +29,7 @@ export const retainGameNotificationHistory = (
       typeof item.read !== 'boolean' ||
       item.generation !== generation ||
       !isGameAlertInWindow(item, Infinity, now) ||
-      !canReceiveGameAlert(item, user, personalSourceDeviceId) ||
+      !canReceiveGameAlert(item, membership) ||
       retained.has(item.id)
     )
       continue;
@@ -45,9 +41,9 @@ export const retainGameNotificationHistory = (
       timeZone: item.timeZone,
       message: item.message,
       ...(item.audience === 'user' || isLiveRecipientAudience(item.audience)
-        ? { recipientUserId: item.recipientUserId, sourceDeviceId: item.sourceDeviceId }
+        ? { recipientMemberId: item.recipientMemberId, sourceMemberId: item.sourceMemberId }
         : {}),
-      gameStateDeviceId: item.gameStateDeviceId,
+      gameSessionId: item.gameSessionId,
       generation,
       read: item.read,
     });

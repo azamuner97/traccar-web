@@ -5,7 +5,6 @@ export const emptyGameNotificationState = () => ({
   key: null,
   generation: null,
   permission: null,
-  personalSourceDeviceId: null,
   items: [],
   handled: [],
   deleted: [],
@@ -53,10 +52,9 @@ const { reducer, actions } = createSlice({
       }
       state.items = retainGameNotificationHistory(
         [...incoming, ...state.items],
-        payload.user,
+        payload.membership,
         state.generation,
         payload.now,
-        state.personalSourceDeviceId,
       );
       state.handled = [...handled];
       state.cursor = payload.cursor;
@@ -73,10 +71,9 @@ const { reducer, actions } = createSlice({
       if (state.key !== payload.key) return;
       state.items = retainGameNotificationHistory(
         state.items,
-        payload.user,
+        payload.membership,
         state.generation,
         payload.now,
-        state.personalSourceDeviceId,
       );
     },
     delete(state, { payload }) {

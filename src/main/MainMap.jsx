@@ -21,7 +21,7 @@ import MapNotification from '../map/control/MapNotification';
 import useFeatures from '../common/util/useFeatures';
 import MapDrawing from '../map/draw/MapDrawing';
 import MapParticipantProximity from '../map/main/MapParticipantProximity';
-import { gameAlertSessionDeviceId } from './gameAlerts';
+import useGameMembership from '../game/useGameMembership';
 
 const MainMap = ({ filteredPositions, selectedPosition, onEventsClick }) => {
   const theme = useTheme();
@@ -30,7 +30,7 @@ const MainMap = ({ filteredPositions, selectedPosition, onEventsClick }) => {
   const desktop = useMediaQuery(theme.breakpoints.up('md'));
 
   const eventsAvailable = useSelector((state) => !!state.events.items.length);
-  const gameUser = useSelector((state) => Boolean(gameAlertSessionDeviceId(state.session.user)));
+  const gameUser = Boolean(useGameMembership());
   const unreadCount = useSelector(
     (state) => state.gameNotifications.items.filter((item) => !item.read).length,
   );

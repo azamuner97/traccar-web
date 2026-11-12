@@ -54,6 +54,7 @@ import {
   canDeleteDrawing,
   canEditDrawing,
   canEditDrawings,
+  withGameRole,
   createArrowheadSdfImage,
   DEFAULT_DRAWING_TEXT_SIZE,
   DRAWING_TEXT_SIZES,
@@ -70,6 +71,7 @@ import {
   nextDrawingDeleteMode,
   staticDrawingFilter,
 } from './drawingUtils';
+import useGameMembership from '../../game/useGameMembership';
 
 const drawingModes = {
   line: 'linestring',
@@ -456,7 +458,10 @@ const MapDrawing = ({ active, onActiveChange }) => {
   const theme = useTheme();
   const t = useTranslation();
   const dispatch = useDispatch();
-  const user = useSelector((state) => state.session.user);
+  const sessionUser = useSelector((state) => state.session.user);
+  // The game role comes from the membership of /api/game-status; the server decides each drawing's sharing.
+  const gameRole = useGameMembership()?.role ?? null;
+  const user = useMemo(() => withGameRole(sessionUser, gameRole), [sessionUser, gameRole]);
   const drawingItems = useSelector((state) => state.drawings.items);
   const drawings = useMemo(() => Object.values(drawingItems), [drawingItems]);
   const editable = canEditDrawings(user);

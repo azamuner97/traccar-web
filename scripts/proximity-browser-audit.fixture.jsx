@@ -5,7 +5,7 @@ import { ThemeProvider, createTheme } from '@mui/material/styles';
 import MapMarkers from '../src/map/MapMarkers';
 import hunterBackground from '../src/resources/images/background-hunter.svg';
 import { loadImage, prepareIcon } from '../src/map/core/mapUtil';
-import store, { devicesActions, sessionActions } from '../src/store';
+import store, { devicesActions, gameActions, sessionActions } from '../src/store';
 import GameProximityController from '../src/main/GameProximityController';
 import MapParticipantProximity from '../src/map/main/MapParticipantProximity';
 import { requestProximitySync } from '../src/main/gameProximity';
@@ -33,19 +33,32 @@ window.fetch = async (url) => {
   if (url.endsWith('/access')) value = grants;
   return new Response(JSON.stringify(value), { status: 200 });
 };
+// Membership comes from the computed game status (data model 2), never from user attributes. A role
+// change makes a new member, so each role has its own member ID.
+const memberIds = { player: 40, supporter: 41, hunter: 42, spectator: 43 };
 const setRole = (role) =>
   store.dispatch(
-    sessionActions.updateUser({
-      id: 111,
-      attributes: {
-        traccarToolUserRole: role,
-        traccarToolSessionDeviceId: 900,
-        traccarToolAssignedDeviceId: 11,
+    gameActions.refreshStatus({
+      key: '111',
+      status: {
+        gameSessionId: 3,
+        memberId: memberIds[role],
+        role,
+        number: 1,
+        displayName: role,
+        controllerActive: true,
+        serverTime: new Date().toISOString(),
+        hash: '0'.repeat(32),
+        status: {},
       },
+      offsetMs: 0,
+      refreshedAt: Date.now(),
     }),
   );
 store.dispatch(sessionActions.updateServer({ attributes: {} }));
 store.dispatch(sessionActions.updateSocket(true));
+store.dispatch(sessionActions.updateUser({ id: 111, attributes: {} }));
+store.dispatch(gameActions.reset('111'));
 setRole('hunter');
 
 const AuditDeviceMarker = () => {
@@ -156,7 +169,13 @@ window.proximityAudit = {
       { id: 11, name: 'Self' },
       { id: 12, name: 'Peer' },
     ];
-    grants = [{ deviceId: 12, expiresAt: new Date(Date.now() + seconds * 1000).toISOString() }];
+    grants = [
+      {
+        memberId: 50,
+        deviceId: 12,
+        expiresAt: new Date(Date.now() + seconds * 1000).toISOString(),
+      },
+    ];
     requestProximitySync();
   },
   select: (deviceId) => store.dispatch(devicesActions.selectId(deviceId)),

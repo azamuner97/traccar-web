@@ -1,6 +1,7 @@
-// The Game page's view of the server's member endpoints: /api/game-status, /api/game-requests and
-// /api/game-jokers. Everything here is derived from what the server already filtered for the signed-in
-// member; nothing is inferred about other participants.
+// The Game page's view of the server's member endpoints of game data model 2: /api/game-status,
+// /api/game-requests, /api/game-jokers and /api/game-timetable. Everything here is derived from what the
+// server already computed and filtered for the signed-in member; nothing is inferred about other participants.
+// Membership (session, member, role and number) comes only from /api/game-status, never from user attributes.
 
 const gameRoles = new Set(['player', 'supporter', 'hunter', 'spectator']);
 
@@ -24,11 +25,42 @@ export const SPEEDHUNT_REQUESTS = [
 // The highest ping a speedhunt fake may name when speedhunts have no ping limit.
 export const MAX_FAKE_PING_NUMBER = 1000;
 
-/** The generated game account's role, or null for administrators and ordinary accounts. */
-export const gameRole = (user) => {
-  const role = user?.attributes?.traccarToolUserRole;
-  return !user?.administrator && gameRoles.has(role) ? role : null;
+const positiveId = (value) => (Number.isSafeInteger(value) && value > 0 ? value : null);
+
+/**
+ * The account whose game data the store holds: every signed-in account except administrators, who operate
+ * games and take part in none. Whether the account is a member is known only from /api/game-status.
+ */
+export const gameAccountKey = (user) =>
+  user && !user.administrator && positiveId(user.id) ? String(user.id) : null;
+
+/**
+ * The signed-in member as /api/game-status names them ({ userId, gameSessionId, memberId, role, number }), or
+ * null for administrators, accounts without membership and while the status is not known yet.
+ */
+export const gameMembership = (user, game) => {
+  const status = game?.status;
+  const key = gameAccountKey(user);
+  if (!key || game?.key !== key || !status || !gameRoles.has(status.role)) return null;
+  const gameSessionId = positiveId(status.gameSessionId);
+  const memberId = positiveId(status.memberId);
+  if (!gameSessionId || !memberId) return null;
+  return {
+    userId: user.id,
+    gameSessionId,
+    memberId,
+    role: status.role,
+    number: positiveId(status.number),
+  };
 };
+
+export const selectGameMembership = (state) => gameMembership(state.session?.user, state.game);
+
+/** The member's identity (session, member and role), from a membership or a status; null without one. */
+export const gameMemberKey = (value) =>
+  positiveId(value?.gameSessionId) && positiveId(value?.memberId) && gameRoles.has(value?.role)
+    ? JSON.stringify([value.gameSessionId, value.memberId, value.role])
+    : null;
 
 export const holdsJokers = (role) => role === 'player' || role === 'supporter';
 
@@ -49,18 +81,6 @@ export const speedhuntPoolView = (jokers) => {
     available: count(item.available),
     overAllocated: count(item.overAllocated),
   };
-};
-
-/** The account, role and assignment the game data belongs to; data for another key is never shown. */
-export const gameAccountKey = (user) => {
-  const role = gameRole(user);
-  if (!role) return null;
-  return JSON.stringify([
-    user.id,
-    role,
-    user.attributes?.traccarToolSessionDeviceId ?? null,
-    user.attributes?.traccarToolAssignedDeviceId ?? null,
-  ]);
 };
 
 const listeners = new Set();
@@ -100,10 +120,8 @@ export const remainingMs = (deadline, offsetMs, now = Date.now()) => {
 
 export const activeHunterLiveShares = (game, user, now) => {
   if (
-    gameRole(user) !== 'hunter' ||
-    game.key !== gameAccountKey(user) ||
+    gameMembership(user, game)?.role !== 'hunter' ||
     game.statusError ||
-    game.status?.role !== 'hunter' ||
     !game.status.controllerActive ||
     !Array.isArray(game.status.status?.liveShares)
   ) {
@@ -111,8 +129,7 @@ export const activeHunterLiveShares = (game, user, now) => {
   }
   return game.status.status.liveShares.filter(
     (share) =>
-      Number.isSafeInteger(share?.deviceId) &&
-      share.deviceId > 0 &&
+      positiveId(share?.memberId) &&
       typeof share.name === 'string' &&
       share.name.trim() &&
       (share.endsAt == null || remainingMs(share.endsAt, game.offsetMs, now) > 0),
@@ -204,19 +221,42 @@ export const fakeUse = (plan) => {
 };
 
 /**
- * One reservation of the member: held by an open request, an armed fake (with its plan) or a speedhunt
- * fake bound to a speedhunt (used). An armed plan or one held by a cancellable request can be cancelled.
+ * The run token of each own armed fake on a running speedhunt, by reservation: /api/game-jokers does not name
+ * it, the member's status (`fakes`) does.
  */
-export const reservationView = (reservation, cancellableRequestIds) => {
-  const plan = reservation?.plan && typeof reservation.plan === 'object' ? reservation.plan : {};
+export const ownFakeRunTokens = (status) =>
+  new Map(
+    (Array.isArray(status?.fakes) ? status.fakes : [])
+      .filter(
+        (item) =>
+          positiveId(item?.reservationId) &&
+          typeof item.runToken === 'string' &&
+          /^[a-f0-9]{32}$/.test(item.runToken),
+      )
+      .map((item) => [item.reservationId, item.runToken]),
+  );
+
+/**
+ * One reservation of the member: held by an open request, an armed fake or planned break (with its plan) or a
+ * speedhunt fake bound to a speedhunt (used). An armed plan or one held by a cancellable request can be
+ * cancelled.
+ */
+export const reservationView = (reservation, cancellableRequestIds, runTokens = new Map()) => {
+  const fake = reservation?.fake && typeof reservation.fake === 'object' ? reservation.fake : {};
+  const plannedBreak =
+    reservation?.plannedBreak && typeof reservation.plannedBreak === 'object'
+      ? reservation.plannedBreak
+      : {};
   let kind = 'held';
-  if (reservation?.bound) kind = 'bound';
+  if (fake.bound === true) kind = 'bound';
   else if (reservation?.armed) kind = 'armed';
-  const scheduledAt = typeof plan.scheduledAt === 'string' ? plan.scheduledAt : null;
-  // A planned break: a break joker armed (or requested) for a later start.
+  const scheduledAt = parseTime(fake.scheduledAt) !== null ? fake.scheduledAt : null;
+  // A planned break: a break joker armed for a later start (the break row owns the plan).
   const startsAt =
-    reservation?.type === 'break' && parseTime(plan.startsAt) !== null ? plan.startsAt : null;
-  const use = FAKE_USES.includes(reservation?.use) ? reservation.use : fakeUse(plan);
+    reservation?.type === 'break' && parseTime(plannedBreak.startsAt) !== null
+      ? plannedBreak.startsAt
+      : null;
+  const use = FAKE_USES.includes(reservation?.use) ? reservation.use : fakeUse(fake);
   const cancellable =
     kind === 'armed' ||
     (kind === 'held' &&
@@ -224,28 +264,32 @@ export const reservationView = (reservation, cancellableRequestIds) => {
       cancellableRequestIds.has(reservation?.requestId));
   return {
     id: reservation?.id,
+    reservationId: reservation?.id,
     type: reservation?.type,
     use: reservation?.type === 'fakePing' ? use : null,
     kind,
     requestId: reservation?.requestId ?? null,
-    entryId: Number.isSafeInteger(plan.entryId) ? plan.entryId : null,
+    entryId: Number.isSafeInteger(fake.entryId) ? fake.entryId : null,
     scheduledAt,
     startsAt,
-    pingNumber: Number.isSafeInteger(plan.pingNumber) ? plan.pingNumber : null,
-    runToken: plan.runToken ?? null,
-    latitude: finite(plan.latitude),
-    longitude: finite(plan.longitude),
-    boundAt: typeof plan.boundAt === 'string' ? plan.boundAt : null,
+    pingNumber: Number.isSafeInteger(fake.pingNumber) ? fake.pingNumber : null,
+    runToken: runTokens.get(reservation?.id) ?? null,
+    latitude: finite(fake.latitude),
+    longitude: finite(fake.longitude),
     cancellable,
   };
 };
 
 const reservationOrder = { armed: 0, held: 1, bound: 2 };
 
-export const reservationsView = (jokers, cancellableRequestIds = new Set()) =>
+export const reservationsView = (
+  jokers,
+  cancellableRequestIds = new Set(),
+  runTokens = new Map(),
+) =>
   (Array.isArray(jokers?.reservations) ? jokers.reservations : [])
     .filter((item) => item && Number.isSafeInteger(item.id) && JOKER_TYPES.includes(item.type))
-    .map((item) => reservationView(item, cancellableRequestIds))
+    .map((item) => reservationView(item, cancellableRequestIds, runTokens))
     .sort(
       (a, b) =>
         reservationOrder[a.kind] - reservationOrder[b.kind] ||
@@ -260,9 +304,10 @@ export const requestState = (request) =>
 
 export const isOpenRequest = (request) => OPEN_REQUEST_STATES.has(request?.status);
 
-export const canCancelRequest = (request, userId) =>
+export const canCancelRequest = (request, memberId) =>
   Boolean(request) &&
-  request.requesterUserId === userId &&
+  positiveId(memberId) !== null &&
+  request.requesterMemberId === memberId &&
   (request.status === 'pending' || request.status === 'approved');
 
 export const sortedRequests = (requests) =>
@@ -367,8 +412,7 @@ export const participantOverviewView = (status) =>
   (Array.isArray(status?.participantOverview) ? status.participantOverview : [])
     .filter(
       (item) =>
-        Number.isSafeInteger(item?.deviceId) &&
-        item.deviceId > 0 &&
+        positiveId(item?.memberId) &&
         typeof item.name === 'string' &&
         holdsJokers(item.role) &&
         typeof item.caught === 'boolean',
@@ -377,22 +421,21 @@ export const participantOverviewView = (status) =>
       (a, b) =>
         Number(a.caught) - Number(b.caught) ||
         a.name.localeCompare(b.name) ||
-        a.deviceId - b.deviceId,
+        a.memberId - b.memberId,
     );
 
 /** The hunters' and spectators' roster, with each participant's speedhunt and break state. */
 export const participantsView = (status, offsetMs, now = Date.now()) =>
   (Array.isArray(status?.participants) ? status.participants : [])
-    .filter((item) => item && Number.isSafeInteger(item.deviceId))
+    .filter((item) => item && positiveId(item.memberId))
     .map((item) => {
       const speedhunt = item.speedhunt && typeof item.speedhunt === 'object' ? item.speedhunt : {};
       return {
-        deviceId: item.deviceId,
-        name: typeof item.name === 'string' && item.name ? item.name : `#${item.deviceId}`,
+        memberId: item.memberId,
+        name: typeof item.name === 'string' && item.name ? item.name : `#${item.memberId}`,
         role: item.role,
         caught: item.caught === true,
         speedhunt: {
-          operation: speedhunt.operation === true,
           running: speedhunt.running === true,
           pings: Number.isSafeInteger(speedhunt.pings) ? speedhunt.pings : 0,
           pingHistory: speedhunt.pingHistory,
@@ -417,11 +460,11 @@ export const fixedLiveMinutes = (limits) => {
 
 export const speedhuntActions = (
   participant,
-  { requests, controllerActive, lastSpeedhuntDeviceId, limits, pool = null },
+  { requests, controllerActive, lastSpeedhuntMemberId, limits, pool = null },
 ) => {
   const open = requests.some(
     (item) =>
-      item.targetDeviceId === participant.deviceId &&
+      item.targetMemberId === participant.memberId &&
       SPEEDHUNT_REQUESTS.includes(item.type) &&
       isOpenRequest(item),
   );
@@ -438,7 +481,7 @@ export const speedhuntActions = (
   else if (noJoker && !participant.speedhunt.live) reason = 'noSpeedhuntJoker';
   const repeat =
     participant.speedhunt.startsRun &&
-    participant.deviceId === lastSpeedhuntDeviceId &&
+    participant.memberId === lastSpeedhuntMemberId &&
     limits?.allowConsecutiveSpeedhunts === false;
   const allowsPing = (type) =>
     ping &&
@@ -478,7 +521,7 @@ export const timetableView = (
   pings,
   { participants = [], offsetMs, now = Date.now(), controllerActive, connected = true } = {},
 ) => {
-  const byDevice = new Map(participants.map((item) => [item.deviceId, item]));
+  const byMember = new Map(participants.map((item) => [item.memberId, item]));
   const current = serverNow(offsetMs, now);
   return (Array.isArray(pings) ? pings : [])
     .filter(
@@ -490,7 +533,7 @@ export const timetableView = (
     )
     .map((item) => {
       const scheduled = parseTime(item.scheduledAt);
-      const participant = byDevice.get(item.deviceId);
+      const participant = byMember.get(item.memberId);
       let state = item.state;
       if (state === 'scheduled') {
         const pause = participant?.break;
@@ -511,7 +554,7 @@ export const timetableView = (
       return {
         entryId: item.entryId,
         scheduledAt: item.scheduledAt,
-        deviceId: item.deviceId,
+        memberId: item.memberId,
         name: participant?.name ?? null,
         state,
         upcoming: scheduled > current,
@@ -524,22 +567,62 @@ export const timetableView = (
 };
 
 /**
- * The member's planned breaks, earliest first: armed ones (cancellable until they start; due once their
- * start has passed, when the break begins as soon as possible) and ones still held by an open request.
+ * The member's planned breaks, earliest first: the planned and waiting breaks of their status (cancellable
+ * through their reservation until they start; due once their start has passed or they wait, when the break
+ * begins as soon as possible) and the breaks for later that an open request still holds.
  */
-export const plannedBreaksView = (reservations, offsetMs, now = Date.now()) =>
-  (Array.isArray(reservations) ? reservations : [])
-    .filter((item) => item.type === 'break' && item.startsAt && item.kind !== 'bound')
-    .map((item) => ({
-      id: item.id,
-      kind: item.kind,
-      requestId: item.requestId,
-      startsAt: item.startsAt,
-      due: parseTime(item.startsAt) <= serverNow(offsetMs, now),
-      remainingMs: remainingMs(item.startsAt, offsetMs, now),
-      cancellable: item.cancellable,
-    }))
-    .sort((a, b) => parseTime(a.startsAt) - parseTime(b.startsAt));
+export const plannedBreaksView = (
+  status,
+  requests,
+  offsetMs,
+  now = Date.now(),
+  cancellableRequestIds = new Set(),
+) => {
+  const current = serverNow(offsetMs, now);
+  const view = (item) => ({
+    ...item,
+    due: item.state === 'waiting' || parseTime(item.startsAt) <= current,
+    remainingMs: remainingMs(item.startsAt, offsetMs, now),
+  });
+  const planned = (Array.isArray(status?.plannedBreaks) ? status.plannedBreaks : [])
+    .filter(
+      (item) =>
+        positiveId(item?.breakId) &&
+        parseTime(item.startsAt) !== null &&
+        (item.state === 'planned' || item.state === 'waiting'),
+    )
+    .map((item) =>
+      view({
+        id: `break:${item.breakId}`,
+        kind: 'armed',
+        state: item.state,
+        reservationId: positiveId(item.reservationId),
+        requestId: null,
+        startsAt: item.startsAt,
+        cancellable: positiveId(item.reservationId) !== null,
+      }),
+    );
+  const held = (Array.isArray(requests) ? requests : [])
+    .filter(
+      (item) =>
+        item?.type === JOKER_REQUESTS.break &&
+        isOpenRequest(item) &&
+        positiveId(item.id) &&
+        parseTime(item.parameters?.startsAt) !== null,
+    )
+    .map((item) =>
+      view({
+        id: `request:${item.id}`,
+        kind: 'held',
+        state: 'requested',
+        reservationId: null,
+        requestId: item.id,
+        startsAt: item.parameters.startsAt,
+        cancellable: cancellableRequestIds.has(item.id),
+      }),
+    );
+  return [...planned, ...held].sort((a, b) => parseTime(a.startsAt) - parseTime(b.startsAt));
+};
 
 /** A device-local date and time as a datetime-local input shows it, e.g. 2026-11-09T14:30. */
 export const localDateTimeInput = (milliseconds) => {
@@ -611,7 +694,11 @@ export const validGameStatus = (value) =>
   Boolean(
     value &&
     typeof value === 'object' &&
-    typeof value.role === 'string' &&
+    positiveId(value.gameSessionId) &&
+    positiveId(value.memberId) &&
+    gameRoles.has(value.role) &&
+    typeof value.hash === 'string' &&
+    /^[0-9a-f]{32}$/.test(value.hash) &&
     typeof value.controllerActive === 'boolean' &&
     parseTime(value.serverTime) !== null &&
     value.status &&

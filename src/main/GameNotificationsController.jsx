@@ -6,6 +6,8 @@ import { useTranslation } from '../common/components/LocalizationProvider';
 import { gameNotificationsActions } from '../store';
 import { gameNotificationCache } from './gameNotificationCache';
 import { gameNotificationAccountKey } from './gameNotificationHistory';
+import { selectGameMembership } from '../game/gameView';
+import useGameMembership from '../game/useGameMembership';
 import { createGameNotificationSync, listenGameNotificationSync } from './gameNotificationSync';
 import {
   canReceiveGameAlert,
@@ -20,10 +22,11 @@ const GameNotificationsController = ({ playAlarm }) => {
   const dispatch = useDispatch();
   const store = useStore();
   const t = useTranslation();
-  const user = useSelector((state) => state.session.user);
+  // Membership comes from /api/game-status; without it there is no game journal to read.
+  const membership = useGameMembership();
   const history = useSelector((state) => state.gameNotifications);
-  const account = gameNotificationAccountKey(window.location.origin, user);
-  const permission = gameAlertPermissionKey(user);
+  const account = gameNotificationAccountKey(window.location.origin, membership);
+  const permission = gameAlertPermissionKey(membership);
   const [queue, setQueue] = useState({ key: null, alerts: [] });
   const [visible, setVisible] = useState(document.visibilityState === 'visible');
   const playedRef = useRef(null);
@@ -32,7 +35,7 @@ const GameNotificationsController = ({ playAlarm }) => {
     if (!account) return undefined;
     const sync = createGameNotificationSync({
       origin: window.location.origin,
-      getUser: () => store.getState().session.user,
+      getMembership: () => selectGameMembership(store.getState()),
       getState: () => store.getState().gameNotifications,
       activate: (payload) => dispatch(gameNotificationsActions.activate(payload)),
       add: (payload) => dispatch(gameNotificationsActions.add(payload)),
@@ -86,18 +89,13 @@ const GameNotificationsController = ({ playAlarm }) => {
 
   const head = queue.key === history.key ? queue.alerts[0] : null;
   const active =
-    canReceiveGameAlert(head, user, history.personalSourceDeviceId) &&
-    head?.generation === history.generation
-      ? head
-      : null;
+    canReceiveGameAlert(head, membership) && head?.generation === history.generation ? head : null;
   useEffect(() => {
     setQueue((current) => ({
       ...current,
-      alerts: current.alerts.filter((alert) =>
-        canReceiveGameAlert(alert, user, history.personalSourceDeviceId),
-      ),
+      alerts: current.alerts.filter((alert) => canReceiveGameAlert(alert, membership)),
     }));
-  }, [user, history.personalSourceDeviceId]);
+  }, [membership]);
   useEffect(() => {
     if (active && !isFreshGameAlert(active)) {
       setQueue((current) => ({

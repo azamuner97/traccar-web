@@ -13,7 +13,7 @@ import EventsDrawer from './EventsDrawer';
 import useFilter from './useFilter';
 import MainToolbar from './MainToolbar';
 import { useAttributePreference } from '../common/util/preferences';
-import { filterLiveDevices, shouldClearSelectedDevice } from './gameState';
+import { filterLiveDevices, gameMapFilter, shouldClearSelectedDevice } from './gameMap';
 
 const MainMap = lazy(() => import('./MainMap'));
 
@@ -77,14 +77,21 @@ const MainPage = () => {
 
   const selectedDeviceId = useSelector((state) => state.devices.selectedId);
   const devices = useSelector((state) => state.devices.items);
-  const gameStateIds = useSelector((state) => state.devices.gameStateIds);
   const user = useSelector((state) => state.session.user);
+  const gameKey = useSelector((state) => state.game.key);
+  const gameStatus = useSelector((state) => state.game.status);
   const positions = useSelector((state) => state.session.positions);
   const filter = useSelector((state) => state.session.liveFilter);
   const filterMap = useSelector((state) => state.session.liveFilterMap);
+  // Membership and catch state come from the computed game status; an unchanged status hash keeps the
+  // stored status, so the filter is rebuilt only when something the member observes changed.
+  const gameFilter = useMemo(
+    () => gameMapFilter(user, { key: gameKey, status: gameStatus }),
+    [user, gameKey, gameStatus],
+  );
   const visibleDevices = useMemo(
-    () => filterLiveDevices(devices, positions, gameStateIds, user),
-    [devices, positions, gameStateIds, user],
+    () => filterLiveDevices(devices, gameFilter),
+    [devices, gameFilter],
   );
   const [filteredPositions, setFilteredPositions] = useState([]);
   const selectedPosition = filteredPositions.find(

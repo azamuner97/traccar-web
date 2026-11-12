@@ -8,14 +8,8 @@ import {
   mergeNotificationEntries,
 } from './gameNotificationHistory.js';
 const generation = '12345678-1234-1234-1234-123456789abc';
-const user = {
-  id: 5,
-  attributes: {
-    traccarToolUserRole: 'hunter',
-    traccarToolSessionDeviceId: 900,
-    traccarToolAssignedDeviceId: 100,
-  },
-};
+// The membership /api/game-status names; user attributes play no part.
+const member = { userId: 5, gameSessionId: 3, memberId: 40, role: 'hunter', number: 1 };
 const now = Date.parse('2026-10-11T12:00:00Z');
 const alert = (changes = {}) => ({
   id: 'one',
@@ -24,7 +18,7 @@ const alert = (changes = {}) => ({
   message: 'message',
   occurredAt: '2026-01-01T12:00:00Z',
   timeZone: 'Europe/Zurich',
-  gameStateDeviceId: 900,
+  gameSessionId: 3,
   generation,
   read: false,
   ...changes,
@@ -33,7 +27,7 @@ test('history retains the full generation without 24-hour or 100-entry limits', 
   const items = Array.from({ length: 250 }, (_, i) =>
     alert({ id: String(i), occurredAt: new Date(now - (i + 1) * 86400000).toISOString() }),
   );
-  assert.equal(retainGameNotificationHistory(items, user, generation, now).length, 250);
+  assert.equal(retainGameNotificationHistory(items, member, generation, now).length, 250);
 });
 test('history validates audience, generation and schema and strips unknown metadata', () => {
   const items = retainGameNotificationHistory(
@@ -41,73 +35,84 @@ test('history validates audience, generation and schema and strips unknown metad
       alert({ privateDevice: 'secret' }),
       alert(),
       alert({ id: 'wrong', generation: 'different' }),
-      alert({ id: 'other', gameStateDeviceId: 901 }),
+      alert({ id: 'other', gameSessionId: 4 }),
+      alert({ id: 'unstamped', gameSessionId: undefined }),
       alert({ id: 'legacy', audience: 'participants' }),
       alert({ id: 'bad', read: 1 }),
     ],
-    user,
+    member,
     generation,
     now,
   );
   assert.equal(items.length, 1);
   assert.equal(items[0].privateDevice, undefined);
 });
-test('history keeps this account targeted fields and rejects another recipient', () => {
+test('history keeps this member targeted fields and rejects another recipient', () => {
   const targeted = alert({
     id: 'exit',
     type: 'geofenceExit',
     audience: 'user',
-    recipientUserId: 5,
-    sourceDeviceId: 100,
+    recipientMemberId: 40,
+    sourceMemberId: 40,
+    recipientLabel: 'Hunter One',
   });
   const items = retainGameNotificationHistory(
-    [targeted, { ...targeted, id: 'other', recipientUserId: 6 }],
-    user,
+    [
+      targeted,
+      { ...targeted, id: 'other', recipientMemberId: 41, sourceMemberId: 41 },
+      { ...targeted, id: 'mixed', sourceMemberId: 41 },
+    ],
+    member,
     generation,
     now,
   );
   assert.equal(items.length, 1);
-  assert.equal(items[0].recipientUserId, 5);
-  assert.equal(items[0].sourceDeviceId, 100);
+  assert.equal(items[0].recipientMemberId, 40);
+  assert.equal(items[0].sourceMemberId, 40);
+  assert.equal(items[0].recipientLabel, undefined, 'label snapshots are not kept');
 });
-test('cache scope includes origin, user, device and generation', () => {
-  const key = gameNotificationHistoryKey('https://one.test', user, generation);
-  assert.notEqual(key, gameNotificationHistoryKey('https://two.test', user, generation));
+test('cache scope includes origin, account, game session and generation', () => {
+  const key = gameNotificationHistoryKey('https://one.test', member, generation);
+  assert.notEqual(key, gameNotificationHistoryKey('https://two.test', member, generation));
   assert.notEqual(
     key,
-    gameNotificationHistoryKey('https://one.test', { ...user, id: 6 }, generation),
+    gameNotificationHistoryKey('https://one.test', { ...member, userId: 6 }, generation),
   );
-  assert.equal(gameNotificationHistoryKey('https://one.test', user, 'bad'), null);
+  assert.notEqual(
+    key,
+    gameNotificationHistoryKey('https://one.test', { ...member, gameSessionId: 4 }, generation),
+  );
+  assert.equal(gameNotificationHistoryKey('https://one.test', member, 'bad'), null);
+  assert.equal(gameNotificationAccountKey('https://one.test', null), null, 'no membership');
   assert.equal(
-    gameNotificationAccountKey('https://one.test', { ...user, administrator: true }),
+    gameNotificationAccountKey('https://one.test', { ...member, gameSessionId: 0 }),
     null,
   );
 });
-test('recipient history persists source and account fields and revalidates the current destination role', () => {
+test('recipient history persists source and member fields and revalidates the current member and role', () => {
   const received = alert({
     type: 'livePingReceived',
     audience: 'liveHunter',
-    recipientUserId: 5,
-    sourceDeviceId: 200,
+    recipientMemberId: 40,
+    sourceMemberId: 20,
   });
-  const items = retainGameNotificationHistory([received], user, generation, now);
+  const items = retainGameNotificationHistory([received], member, generation, now);
   assert.deepEqual(items, [received]);
   assert.equal(
-    retainGameNotificationHistory(
-      items,
-      {
-        ...user,
-        attributes: {
-          ...user.attributes,
-          traccarToolUserRole: 'player',
-        },
-      },
-      generation,
-      now,
-    ).length,
+    retainGameNotificationHistory(items, { ...member, role: 'player' }, generation, now).length,
     0,
   );
-  assert.equal(retainGameNotificationHistory(items, { ...user, id: 6 }, generation, now).length, 0);
+  assert.equal(
+    retainGameNotificationHistory(items, { ...member, memberId: 41 }, generation, now).length,
+    0,
+    'a role change makes a new member without the personal history',
+  );
+  assert.equal(
+    retainGameNotificationHistory([{ ...received, sourceMemberId: 40 }], member, generation, now)
+      .length,
+    0,
+    'a live recipient is never their own source',
+  );
 });
 test('date formatting respects midnight and DST and keeps native events navigable', () => {
   assert.equal(

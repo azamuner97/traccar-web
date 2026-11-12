@@ -8,7 +8,8 @@ import LiveShareInfo from './LiveShareInfo';
 import SpeedhuntHistoryCard from './SpeedhuntHistoryCard';
 import ParticipantGameView from './ParticipantGameView';
 import HunterGameView from './HunterGameView';
-import { gameAccountKey, gameRole, holdsJokers } from './gameView';
+import { holdsJokers } from './gameView';
+import useGameMembership from './useGameMembership';
 import useGameTranslation from './useGameTranslation';
 
 const useStyles = makeStyles()((theme) => ({
@@ -38,12 +39,12 @@ const GamePage = () => {
   const { classes } = useStyles();
   const navigate = useNavigate();
   const t = useGameTranslation();
-  const user = useSelector((state) => state.session.user);
   const socket = useSelector((state) => state.session.socket);
   const game = useSelector((state) => state.game);
-  const role = gameRole(user);
-  const accountKey = gameAccountKey(user);
-  const gameSessionId = game.key === accountKey ? game.status?.gameSessionId : null;
+  // Membership comes from /api/game-status; its role selects the view.
+  const membership = useGameMembership();
+  const role = membership?.role ?? null;
+  const gameSessionId = membership?.gameSessionId ?? null;
 
   return (
     <div className={classes.root}>
@@ -57,18 +58,24 @@ const GamePage = () => {
       </AppBar>
       <div className={classes.content}>
         <div className={classes.column}>
-          <GameStateCard game={game} socket={socket} showSpeedhunt={holdsJokers(role)} />
+          {game.membership === 'none' ? (
+            <Alert severity="info">{t('gameNoMembership')}</Alert>
+          ) : (
+            <GameStateCard game={game} socket={socket} showSpeedhunt={holdsJokers(role)} />
+          )}
           {role === 'hunter' && <LiveShareInfo />}
           {role && gameSessionId && (
             <SpeedhuntHistoryCard
-              key={JSON.stringify([accountKey, gameSessionId])}
+              key={JSON.stringify([membership.userId, gameSessionId, membership.memberId])}
               gameSessionId={gameSessionId}
               controllerActive={game.status.controllerActive}
               refreshedAt={game.refreshedAt}
               statusError={game.statusError}
             />
           )}
-          {holdsJokers(role) && game.loaded && <ParticipantGameView game={game} user={user} />}
+          {holdsJokers(role) && game.loaded && (
+            <ParticipantGameView game={game} membership={membership} />
+          )}
           {role && !holdsJokers(role) && game.loaded && (
             <HunterGameView game={game} controls={role === 'hunter'} />
           )}

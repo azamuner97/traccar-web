@@ -99,7 +99,7 @@ const SpeedhuntHistoryCard = ({ gameSessionId, controllerActive, refreshedAt, st
           <Typography color="textSecondary">{t('gameSpeedhuntHistoryEmpty')}</Typography>
         )}
       </CardContent>
-      {runs?.slice(0, visibleCount).map(({ id, startedAt, status, pings }, index) => {
+      {runs?.slice(0, visibleCount).map(({ runId: id, startedAt, status, pings }, index) => {
         const runStatus = status === 'inProgress' && !controllerActive ? 'paused' : status;
         const inProgress = runStatus === 'inProgress';
         const startDate = formatTime(startedAt, 'date');
@@ -156,7 +156,7 @@ const SpeedhuntHistoryCard = ({ gameSessionId, controllerActive, refreshedAt, st
                 </Typography>
               ) : (
                 <Box component="ul" sx={{ listStyle: 'none', p: 0, m: 0 }}>
-                  {pings.map(({ number, sentAt, type }) => (
+                  {pings.map(({ number, sentAt, mode }) => (
                     <Stack
                       component="li"
                       key={number}
@@ -189,8 +189,8 @@ const SpeedhuntHistoryCard = ({ gameSessionId, controllerActive, refreshedAt, st
                         <Chip
                           size="small"
                           variant="outlined"
-                          color={type === 'live' ? 'primary' : 'default'}
-                          label={t(type === 'live' ? 'gameLive' : 'gameSpeedhuntHistoryStatic')}
+                          color={mode === 'live' ? 'primary' : 'default'}
+                          label={t(mode === 'live' ? 'gameLive' : 'gameSpeedhuntHistoryStatic')}
                         />
                       </Stack>
                     </Stack>

@@ -38,7 +38,7 @@ const LiveShareInfo = () => {
         }}
       >
         {shares.map((share) => (
-          <li key={share.deviceId}>
+          <li key={share.memberId}>
             {share.name}
             <Typography component="span" variant="body2">
               {' · '}

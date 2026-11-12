@@ -13,7 +13,7 @@ import {
 } from './drawingEditor.js';
 import { drawingFeatureId } from './drawingUtils.js';
 
-const user = { id: 2, disableDrawings: false, attributes: { traccarToolUserRole: 'hunter' } };
+const user = { id: 2, disableDrawings: false, attributes: {}, gameRole: 'hunter' };
 const arrow = {
   id: 42,
   ownerId: 1,

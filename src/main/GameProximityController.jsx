@@ -2,12 +2,14 @@ import { useEffect, useRef } from 'react';
 import { useDispatch, useSelector, useStore } from 'react-redux';
 import { devicesActions, errorsActions, gameProximityActions, sessionActions } from '../store';
 import createRefreshScheduler from '../common/util/refreshScheduler';
-import { gameAlertSessionDeviceId } from './gameAlerts';
 import {
-  proximityCircleSessionId,
+  readsProximityAccess,
+  readsProximityCircles,
   subscribeProximitySync,
   validProximityCircle,
 } from './gameProximity';
+import { gameMemberKey } from '../game/gameView';
+import useGameMembership from '../game/useGameMembership';
 
 const GameProximityController = () => {
   const dispatch = useDispatch();
@@ -18,13 +20,15 @@ const GameProximityController = () => {
   const selectedRef = useRef(selectedId);
   const accessRef = useRef({ key: null, grants: [] });
   selectedRef.current = selectedId;
-  const sessionDeviceId = proximityCircleSessionId(user);
-  const role = user?.attributes?.traccarToolUserRole;
-  const userSessionId = gameAlertSessionDeviceId(user);
-  const assignedDeviceId = user?.attributes?.traccarToolAssignedDeviceId;
+  // Membership (from /api/game-status) decides what proximity the account reads; the endpoints resolve the
+  // member's session themselves.
+  const membership = useGameMembership();
+  const memberKey = gameMemberKey(membership);
+  const circlesAllowed = readsProximityCircles(membership);
+  const accessAllowed = readsProximityAccess(membership);
   useEffect(() => {
-    dispatch(gameProximityActions.refresh({ sessionDeviceId, circles: [] }));
-    const accessKey = JSON.stringify([user?.id, role, userSessionId, assignedDeviceId]);
+    dispatch(gameProximityActions.refresh({ memberKey, circles: [] }));
+    const accessKey = JSON.stringify([user?.id, memberKey]);
     if (accessRef.current.key !== accessKey) {
       for (const grant of accessRef.current.grants) {
         dispatch(devicesActions.remove(grant.deviceId));
@@ -43,12 +47,8 @@ const GameProximityController = () => {
           await Promise.all([
             fetch('/api/devices', options),
             fetch('/api/positions', options),
-            sessionDeviceId
-              ? fetch(`/api/game-proximity/session/${sessionDeviceId}/circles`, options)
-              : Promise.resolve(null),
-            ['player', 'supporter'].includes(role) && userSessionId
-              ? fetch(`/api/game-proximity/session/${userSessionId}/access`, options)
-              : Promise.resolve(null),
+            circlesAllowed ? fetch('/api/game-proximity/circles', options) : Promise.resolve(null),
+            accessAllowed ? fetch('/api/game-proximity/access', options) : Promise.resolve(null),
           ]);
         if (!devicesResponse.ok || !positionsResponse.ok)
           throw new Error('Could not refresh device access');
@@ -91,7 +91,7 @@ const GameProximityController = () => {
         );
         if (selectedRef.current != null && !allowed.includes(selectedRef.current))
           dispatch(devicesActions.selectId(null));
-        dispatch(gameProximityActions.refresh({ sessionDeviceId, circles }));
+        dispatch(gameProximityActions.refresh({ memberKey, circles }));
       },
       fail: (error) => {
         if (error.name !== 'AbortError') dispatch(errorsActions.push(error.message));
@@ -130,7 +130,7 @@ const GameProximityController = () => {
       unsubscribeStore();
       unsubscribe();
     };
-  }, [dispatch, store, user?.id, role, sessionDeviceId, userSessionId, assignedDeviceId, socket]);
+  }, [dispatch, store, user?.id, memberKey, circlesAllowed, accessAllowed, socket]);
   return null;
 };
 export default GameProximityController;

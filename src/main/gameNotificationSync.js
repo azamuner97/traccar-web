@@ -1,7 +1,6 @@
 import {
   canReceiveGameAlert,
   gameAlertPermissionKey,
-  gameAlertSessionDeviceId,
   isFreshGameAlert,
   isGameAlertInWindow,
   isValidGameAlert,
@@ -32,41 +31,43 @@ const validCursor = (cursor) =>
   /^[0-9]{1,19}$/.test(cursor) &&
   BigInt(cursor) <= 9223372036854775807n;
 
-export const validateNotificationPage = (page, user, now = Date.now()) => {
+/**
+ * Checks one page of /api/game-notifications (data model 2) for the member. Pages name no session: they are
+ * requested with the member's `gameSessionId`, which the server refuses (403) for any other session, so every
+ * item is stamped with that session before it is checked and kept.
+ */
+export const validateNotificationPage = (page, membership, now = Date.now()) => {
   if (
-    page?.version !== 2 ||
-    page.sessionDeviceId !== gameAlertSessionDeviceId(user) ||
+    !page ||
+    typeof page !== 'object' ||
     !(page.generation === null || isNotificationGeneration(page.generation)) ||
     !Array.isArray(page.items) ||
     !validCursor(page.nextCursor) ||
     typeof page.hasMore !== 'boolean' ||
-    !(
-      page.personalSourceDeviceId === null ||
-      (Number.isSafeInteger(page.personalSourceDeviceId) &&
-        page.personalSourceDeviceId > 0 &&
-        page.personalSourceDeviceId === Number(user?.attributes?.traccarToolAssignedDeviceId) &&
-        ['player', 'supporter', 'hunter'].includes(user?.attributes?.traccarToolUserRole))
-    ) ||
-    (page.generation === null && (page.items.length || page.hasMore))
+    (page.generation === null && (page.items.length || page.hasMore)) ||
+    !gameNotificationAccountKey('', membership)
   ) {
     throw new Error('Invalid notification history response');
   }
-  for (const item of page.items) {
+  const items = page.items.map((item) =>
+    item && typeof item === 'object' ? { ...item, gameSessionId: membership.gameSessionId } : item,
+  );
+  for (const item of items) {
     if (
       !isValidGameAlert(item) ||
       !isGameAlertInWindow(item, Infinity, now) ||
-      !canReceiveGameAlert(item, user, page.personalSourceDeviceId) ||
+      !canReceiveGameAlert(item, membership) ||
       item.generation !== page.generation
     ) {
       throw new Error('Invalid notification history record');
     }
   }
-  return page;
+  return { ...page, items };
 };
 
 export const createGameNotificationSync = ({
   origin,
-  getUser,
+  getMembership,
   getState,
   activate,
   add,
@@ -77,8 +78,8 @@ export const createGameNotificationSync = ({
   fetchPage,
   now = Date.now,
 }) => {
-  const account = gameNotificationAccountKey(origin, getUser());
-  const permission = gameAlertPermissionKey(getUser());
+  const account = gameNotificationAccountKey(origin, getMembership());
+  const permission = gameAlertPermissionKey(getMembership());
   let running = false;
   let requested = false;
   let cancelled = false;
@@ -89,32 +90,19 @@ export const createGameNotificationSync = ({
   const current = () =>
     !cancelled &&
     account &&
-    account === gameNotificationAccountKey(origin, getUser()) &&
-    permission === gameAlertPermissionKey(getUser());
+    account === gameNotificationAccountKey(origin, getMembership()) &&
+    permission === gameAlertPermissionKey(getMembership());
 
-  const hydrate = async (generation, personalSourceDeviceId, discardPrevious = false) => {
-    const key = gameNotificationHistoryKey(origin, getUser(), generation);
-    if (
-      getState().key === key &&
-      getState().permission === permission &&
-      (personalSourceDeviceId === undefined ||
-        getState().personalSourceDeviceId === personalSourceDeviceId)
-    )
-      return;
+  const hydrate = async (generation, discardPrevious = false) => {
+    const key = gameNotificationHistoryKey(origin, getMembership(), generation);
+    if (getState().key === key && getState().permission === permission) return;
     const cached = await cache.load(key);
     if (!current()) return;
-    const sourceDeviceId =
-      personalSourceDeviceId === undefined
-        ? Number.isSafeInteger(cached?.personalSourceDeviceId)
-          ? cached.personalSourceDeviceId
-          : null
-        : personalSourceDeviceId;
     const retained = retainGameNotificationHistory(
       cached?.items,
-      getUser(),
+      getMembership(),
       generation,
       now(),
-      sourceDeviceId,
     );
     const deleted = ids(cached?.deleted);
     const deletedIds = new Set(deleted);
@@ -127,7 +115,6 @@ export const createGameNotificationSync = ({
     const validSnapshot =
       cached?.generation === generation &&
       cached?.permission === permission &&
-      cached?.personalSourceDeviceId === sourceDeviceId &&
       Array.isArray(cached.items) &&
       retained.length === cached.items.length &&
       Array.isArray(cached.handled) &&
@@ -138,7 +125,6 @@ export const createGameNotificationSync = ({
       key,
       generation,
       permission,
-      personalSourceDeviceId: sourceDeviceId,
       items,
       handled: ids([...ids(cached?.handled), ...retained.map((item) => item.id)]),
       deleted,
@@ -160,15 +146,10 @@ export const createGameNotificationSync = ({
     status({ loading: true });
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
+        const gameSessionId = getMembership().gameSessionId;
         const metadata = validateNotificationPage(
-          await fetchPage(
-            {
-              sessionDeviceId: gameAlertSessionDeviceId(getUser()),
-              limit: 1,
-            },
-            controller.signal,
-          ),
-          getUser(),
+          await fetchPage({ gameSessionId, limit: 1 }, controller.signal),
+          getMembership(),
           now(),
         );
         if (!current()) return;
@@ -176,30 +157,29 @@ export const createGameNotificationSync = ({
           status({ loading: false });
           return;
         }
-        await hydrate(metadata.generation, metadata.personalSourceDeviceId, true);
+        await hydrate(metadata.generation, true);
         if (!current()) return;
-        const key = gameNotificationHistoryKey(origin, getUser(), metadata.generation);
+        const key = gameNotificationHistoryKey(origin, getMembership(), metadata.generation);
         if (pendingKey !== key) {
           pending.clear();
           pendingKey = key;
         }
         for (const [id, item] of pending) {
-          if (!canReceiveGameAlert(item, getUser(), metadata.personalSourceDeviceId))
-            pending.delete(id);
+          if (!canReceiveGameAlert(item, getMembership())) pending.delete(id);
         }
         let cursor = getState().cursor;
         while (current()) {
           const page = validateNotificationPage(
             await fetchPage(
               {
-                sessionDeviceId: metadata.sessionDeviceId,
+                gameSessionId,
                 generation: metadata.generation,
                 after: cursor,
                 limit: 100,
               },
               controller.signal,
             ),
-            getUser(),
+            getMembership(),
             now(),
           );
           if (!current()) return;
@@ -210,11 +190,6 @@ export const createGameNotificationSync = ({
           ) {
             throw new Error('Notification history cursor did not advance');
           }
-          if (page.personalSourceDeviceId !== metadata.personalSourceDeviceId) {
-            await hydrate(page.generation, page.personalSourceDeviceId);
-            requested = true;
-            return;
-          }
           const state = getState();
           const handled = new Set([...state.handled, ...state.deleted]);
           page.items
@@ -224,7 +199,13 @@ export const createGameNotificationSync = ({
                 (!state.clearBefore || Date.parse(item.occurredAt) > state.clearBefore),
             )
             .forEach((item) => pending.set(item.id, item));
-          add({ key, items: page.items, user: getUser(), now: now(), cursor: page.nextCursor });
+          add({
+            key,
+            items: page.items,
+            membership: getMembership(),
+            now: now(),
+            cursor: page.nextCursor,
+          });
           cursor = page.nextCursor;
           if (!page.hasMore) break;
         }

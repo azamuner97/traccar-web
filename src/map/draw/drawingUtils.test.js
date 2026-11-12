@@ -20,6 +20,7 @@ import {
   normalizeDrawingTextSize,
   nextDrawingDeleteMode,
   staticDrawingFilter,
+  withGameRole,
 } from './drawingUtils.js';
 
 const drawing = {
@@ -167,10 +168,18 @@ test('drawing values and permissions are normalized', () => {
   assert.equal(normalizeDrawingColor('red'), '#FF0000');
   assert.equal(normalizeDrawingText(`a\r\n${'x'.repeat(250)}`).length, 200);
   assert.equal(canEditDrawings({ disableDrawings: false, attributes: {} }), true);
+  // The game role comes from the membership of /api/game-status, never from user attributes.
   assert.equal(
-    canEditDrawings({ disableDrawings: false, attributes: { traccarToolUserRole: 'spectator' } }),
+    canEditDrawings(withGameRole({ disableDrawings: false, attributes: {} }, 'spectator')),
     false,
   );
+  assert.equal(
+    canEditDrawings({ disableDrawings: false, attributes: { traccarToolUserRole: 'spectator' } }),
+    true,
+    'user attributes carry no membership',
+  );
+  assert.equal(canEditDrawings(withGameRole({ disableDrawings: false }, 'hunter')), true);
+  assert.equal(withGameRole(null, 'hunter'), null);
   assert.equal(canEditDrawings({ administrator: true, disableDrawings: true }), true);
 });
 
@@ -228,10 +237,7 @@ test('server capabilities authorize shared editing and deletion without trusting
   assert.equal(canEditDrawing({ ...shared, canEdit: false }, user), false);
   assert.equal(canDeleteDrawing({ ...shared, canDelete: false }, user), false);
   assert.equal(canEditDrawing(shared, { ...user, disableDrawings: true }), false);
-  assert.equal(
-    canDeleteDrawing(shared, { ...user, attributes: { traccarToolUserRole: 'spectator' } }),
-    false,
-  );
+  assert.equal(canDeleteDrawing(shared, withGameRole(user, 'spectator')), false);
   assert.equal(canEditDrawing({ id: 10, ownerId: 8 }, user), false);
   assert.equal(canDeleteDrawing({ id: 10, ownerId: 8 }, user), false);
   assert.equal(canEditDrawing({ id: 10, ownerId: 7 }, user), true);

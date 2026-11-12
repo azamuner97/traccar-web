@@ -2,19 +2,21 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   proximityCircleLabel,
-  proximityCircleSessionId,
+  readsProximityAccess,
+  readsProximityCircles,
   validProximityCircle,
 } from './gameProximity.js';
 import { canReceiveGameAlert, isValidGameAlert } from './gameAlerts.js';
 import { sessionActions, sessionReducer } from '../store/session.js';
 
-const user = (role) => ({
-  id: 111,
-  attributes: {
-    traccarToolUserRole: role,
-    traccarToolSessionDeviceId: 900,
-    traccarToolAssignedDeviceId: 11,
-  },
+// The membership /api/game-status names; user attributes play no part.
+const member = (role, changes = {}) => ({
+  userId: 111,
+  gameSessionId: 3,
+  memberId: 40,
+  role,
+  number: 1,
+  ...changes,
 });
 const circle = {
   id: 'circle',
@@ -26,12 +28,21 @@ const circle = {
   expiresAt: '2026-10-14T12:00:00Z',
 };
 
-test('circles are scoped to generated hunters and spectators', () => {
-  for (const role of ['hunter', 'spectator'])
-    assert.equal(proximityCircleSessionId(user(role)), 900);
-  for (const role of ['player', 'supporter'])
-    assert.equal(proximityCircleSessionId(user(role)), null);
-  assert.equal(proximityCircleSessionId({ ...user('hunter'), administrator: true }), null);
+test('circles are read by session hunters and spectators, access by players and supporters', () => {
+  for (const role of ['hunter', 'spectator']) {
+    assert.equal(readsProximityCircles(member(role)), true);
+    assert.equal(readsProximityAccess(member(role)), false);
+  }
+  for (const role of ['player', 'supporter']) {
+    assert.equal(readsProximityCircles(member(role)), false);
+    assert.equal(readsProximityAccess(member(role)), true);
+  }
+  assert.equal(
+    readsProximityCircles(null),
+    false,
+    'administrators and accounts without membership',
+  );
+  assert.equal(readsProximityAccess(null), false);
 });
 test('circles expire locally and contain count labels only', () => {
   const now = Date.parse('2026-10-14T11:59:00Z');
@@ -47,38 +58,27 @@ test('entry, separation, and sharing starts are personal; group alerts reach onl
     occurredAt: '2026-10-14T10:00:00Z',
     timeZone: 'UTC',
     message: 'Proximity',
-    gameStateDeviceId: 900,
+    recipientMemberId: null,
+    sourceMemberId: null,
+    gameSessionId: 3,
   };
   for (const type of [
     'participantProximityEnter',
     'participantProximityExit',
     'participantProximityConsequence',
   ]) {
-    const alert = { ...common, type, audience: 'user', recipientUserId: 111, sourceDeviceId: 11 };
+    const alert = { ...common, type, audience: 'user', recipientMemberId: 40, sourceMemberId: 40 };
     assert.ok(isValidGameAlert(alert));
-    assert.ok(canReceiveGameAlert(alert, user('player')));
-    assert.ok(canReceiveGameAlert(alert, user('supporter')));
-    assert.equal(canReceiveGameAlert(alert, { ...user('player'), id: 112 }), false);
-    assert.equal(
-      canReceiveGameAlert(alert, {
-        ...user('player'),
-        attributes: { ...user('player').attributes, traccarToolAssignedDeviceId: 12 },
-      }),
-      false,
-    );
-    assert.equal(
-      canReceiveGameAlert(alert, {
-        ...user('player'),
-        attributes: { ...user('player').attributes, traccarToolSessionDeviceId: 901 },
-      }),
-      false,
-    );
+    assert.ok(canReceiveGameAlert(alert, member('player')));
+    assert.ok(canReceiveGameAlert(alert, member('supporter')));
+    assert.equal(canReceiveGameAlert(alert, member('player', { memberId: 41 })), false);
+    assert.equal(canReceiveGameAlert(alert, member('player', { gameSessionId: 4 })), false);
     assert.equal(
       isValidGameAlert({
         ...alert,
         audience: 'session',
-        recipientUserId: undefined,
-        sourceDeviceId: undefined,
+        recipientMemberId: null,
+        sourceMemberId: null,
       }),
       false,
     );
@@ -88,7 +88,7 @@ test('entry, separation, and sharing starts are personal; group alerts reach onl
   assert.ok(isValidGameAlert(consequence));
   for (const role of ['player', 'supporter', 'hunter', 'spectator']) {
     assert.equal(
-      canReceiveGameAlert(consequence, user(role)),
+      canReceiveGameAlert(consequence, member(role)),
       ['hunter', 'spectator'].includes(role),
     );
   }

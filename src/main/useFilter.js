@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useSelector } from 'react-redux';
 import dayjs from 'dayjs';
-import { filterLivePositions } from './gameState';
+import { filterLivePositions } from './gameMap';
 
 export default (
   keyword,

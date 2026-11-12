@@ -1,15 +1,15 @@
-import { gameAlertSessionDeviceId } from './gameAlerts.js';
-
 const subscribers = new Set();
 export const requestProximitySync = () => subscribers.forEach((listener) => listener());
 export const subscribeProximitySync = (listener) => {
   subscribers.add(listener);
   return () => subscribers.delete(listener);
 };
-export const proximityCircleSessionId = (user) =>
-  ['hunter', 'spectator'].includes(user?.attributes?.traccarToolUserRole)
-    ? gameAlertSessionDeviceId(user)
-    : null;
+// Proximity is scoped by game-session membership (/api/game-status): hunters and the spectator read the circles
+// of their session, players and supporters their own temporary access to other participants' trackers.
+export const readsProximityCircles = (membership) =>
+  ['hunter', 'spectator'].includes(membership?.role);
+export const readsProximityAccess = (membership) =>
+  ['player', 'supporter'].includes(membership?.role);
 export const validProximityCircle = (circle, now = Date.now()) =>
   Boolean(
     circle &&

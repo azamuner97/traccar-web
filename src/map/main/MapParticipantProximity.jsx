@@ -6,17 +6,15 @@ import useMapLayer from '../core/useMapLayer';
 import { findFonts, toMapCoordinates } from '../core/mapUtil';
 import { useAttributePreference } from '../../common/util/preferences';
 import { createProximityCircle, proximityMinimumDiameter } from './proximityCircleGeometry';
-import {
-  proximityCircleLabel,
-  proximityCircleSessionId,
-  validProximityCircle,
-} from '../../main/gameProximity';
+import { proximityCircleLabel, validProximityCircle } from '../../main/gameProximity';
+import { gameMemberKey } from '../../game/gameView';
+import useGameMembership from '../../game/useGameMembership';
 
 const MapParticipantProximity = () => {
   const theme = useTheme();
   const desktop = useMediaQuery(theme.breakpoints.up('md'));
   const iconScale = useAttributePreference('iconScale', desktop ? 0.75 : 1);
-  const user = useSelector((state) => state.session.user);
+  const memberKey = gameMemberKey(useGameMembership());
   const proximity = useSelector((state) => state.gameProximity);
   const [viewportRevision, refreshViewport] = useReducer((value) => value + 1, 0);
   const [now, setNow] = useState(() => Date.now());
@@ -41,8 +39,9 @@ const MapParticipantProximity = () => {
       if (frame !== undefined) cancelAnimationFrame(frame);
     };
   }, []);
+  // Only the circles read for the current member, which only hunters and the spectator read.
   const circles =
-    proximityCircleSessionId(user) === proximity.sessionDeviceId
+    memberKey && memberKey === proximity.memberKey
       ? proximity.circles.filter((circle) => validProximityCircle(circle, now))
       : [];
   useMapLayer({
@@ -94,7 +93,7 @@ const MapParticipantProximity = () => {
         ];
       }),
     },
-    dataDeps: [proximity, user, now, iconScale, viewportRevision],
+    dataDeps: [proximity, memberKey, now, iconScale, viewportRevision],
   });
   return null;
 };

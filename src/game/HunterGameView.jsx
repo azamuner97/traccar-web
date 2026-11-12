@@ -82,9 +82,6 @@ const ParticipantRow = ({ participant, limits, actions, controls, onAction, busy
         {speedhunt.running && (
           <Chip size="small" color="error" label={`${t('gameSpeedhuntRunning')} · ${pings}`} />
         )}
-        {!speedhunt.running && speedhunt.operation && (
-          <Chip size="small" label={t('gameSpeedhuntOpen')} />
-        )}
         {speedhunt.live && (
           <Chip
             size="small"
@@ -202,7 +199,7 @@ const HunterGameView = ({ game, controls }) => {
   const participants = participantsView(status, game.offsetMs, now);
   // Hunters share one pool of speedhunt jokers; spectators do not read it.
   const pool = controls ? speedhuntPoolView(game.jokers) : null;
-  const lastTarget = participants.find((item) => item.deviceId === status.lastSpeedhuntDeviceId);
+  const lastTarget = participants.find((item) => item.memberId === status.lastSpeedhuntMemberId);
   const duration = fixedLiveMinutes(status.limits);
   const requests = sortedRequests(game.requests).filter((item) =>
     SPEEDHUNT_REQUESTS.includes(item.type),
@@ -236,7 +233,7 @@ const HunterGameView = ({ game, controls }) => {
     setConfirming(null);
     run({
       type,
-      targetDeviceId: participant.deviceId,
+      targetMemberId: participant.memberId,
       baseRevision: participant.speedhunt.revision,
       ...(repeat && { parameters: { confirmConsecutive: true } }),
     });
@@ -272,7 +269,7 @@ const HunterGameView = ({ game, controls }) => {
         {participants.length ? (
           <List dense>
             {participants.map((participant, index) => (
-              <Fragment key={participant.deviceId}>
+              <Fragment key={participant.memberId}>
                 {index > 0 && <Divider component="li" />}
                 <ParticipantRow
                   participant={participant}
@@ -281,7 +278,7 @@ const HunterGameView = ({ game, controls }) => {
                     requests,
                     controllerActive,
                     limits: status.limits,
-                    lastSpeedhuntDeviceId: status.lastSpeedhuntDeviceId,
+                    lastSpeedhuntMemberId: status.lastSpeedhuntMemberId,
                     pool,
                   })}
                   controls={controls}

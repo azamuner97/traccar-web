@@ -13,7 +13,7 @@ import TermsDialog from './common/components/TermsDialog';
 import Loader from './common/components/Loader';
 import fetchOrThrow from './common/util/fetchOrThrow';
 import SpeedhuntAlert from './game/SpeedhuntAlert';
-import { gameAccountKey } from './game/gameView';
+import useGameMembership from './game/useGameMembership';
 
 const useStyles = makeStyles()(() => ({
   page: {
@@ -40,7 +40,12 @@ const App = () => {
   const newServer = useSelector((state) => state.session.server.newServer);
   const termsUrl = useSelector((state) => state.session.server.attributes.termsUrl);
   const user = useSelector((state) => state.session.user);
-  const speedhuntAccount = user?.administrator ? `admin:${user.id}` : gameAccountKey(user);
+  // Administrators and game members (from /api/game-status) see the anonymous speedhunt banner.
+  const membership = useGameMembership();
+  const speedhuntAccount = user?.administrator
+    ? `admin:${user.id}`
+    : membership &&
+      JSON.stringify([membership.userId, membership.gameSessionId, membership.memberId]);
 
   const acceptTerms = useCatch(async () => {
     const response = await fetchOrThrow(`/api/users/${user.id}`, {

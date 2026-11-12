@@ -11,8 +11,10 @@ import { LocalizationProvider } from '../src/common/components/LocalizationProvi
 import dimensions from '../src/common/theme/dimensions';
 import EventsDrawer from '../src/main/EventsDrawer';
 import MapNotification from '../src/map/control/MapNotification';
-import { canReceiveGameAlert, gameAlertSessionDeviceId } from '../src/main/gameAlerts';
+import { canReceiveGameAlert } from '../src/main/gameAlerts';
 import { gameNotificationCache } from '../src/main/gameNotificationCache';
+import { gameMemberKey, selectGameMembership } from '../src/game/gameView';
+import useGameMembership from '../src/game/useGameMembership';
 
 const sockets = [];
 class AuditSocket {
@@ -40,56 +42,125 @@ window.WebSocket = AuditSocket;
 let serverUser = {
   id: 5,
   attributes: {
-    traccarToolUserRole: 'player',
-    traccarToolSessionDeviceId: 900,
-    traccarToolAssignedDeviceId: 100,
     notificationTokens: 'one,two,three',
     language: 'en',
   },
 };
 const userKey = 'notificationAuditUser';
 serverUser = JSON.parse(window.sessionStorage.getItem(userKey) || 'null') || serverUser;
+// The server's membership binding (data model 2): /api/game-status names it, user attributes do not. A role
+// change makes a new member, so each role has its own member ID; null means no membership (403).
+const memberIds = { player: 40, supporter: 41, hunter: 42, spectator: 43 };
+const membershipKey = 'notificationAuditMembership';
+let membership = JSON.parse(window.sessionStorage.getItem(membershipKey) || 'null') || {
+  gameSessionId: 3,
+  role: 'player',
+};
+const saveMembership = () =>
+  window.sessionStorage.setItem(membershipKey, JSON.stringify(membership ?? { none: true }));
+if (membership.none) membership = null;
+const serverMember = () =>
+  membership && {
+    userId: serverUser.id,
+    gameSessionId: membership.gameSessionId,
+    memberId: memberIds[membership.role],
+    role: membership.role,
+    number: 1,
+  };
+const projections = {
+  player: { participantOverview: [], fakes: [], plannedBreaks: [] },
+  supporter: { participantOverview: [], fakes: [], plannedBreaks: [] },
+  hunter: { participants: [], limits: {}, lastSpeedhuntMemberId: null, liveShares: [] },
+  spectator: { participants: [], limits: {} },
+};
 const tokenWrites = [];
 const serverKey = 'notificationAuditServer';
 let sessions = JSON.parse(window.sessionStorage.getItem(serverKey) || '{}');
 let failing = false;
-let trackerAccess = true;
 const getSession = (id) => {
   sessions[id] ||= { generation: window.crypto.randomUUID(), records: [] };
   return sessions[id];
 };
 const saveServer = () => window.sessionStorage.setItem(serverKey, JSON.stringify(sessions));
-getSession(900);
+getSession(3);
 saveServer();
-const invalidate = () =>
+const invalidate = (resources = ['game-notifications']) =>
   sockets.at(-1)?.onmessage?.({
-    data: JSON.stringify({ invalidate: ['game-notifications'] }),
+    data: JSON.stringify({ invalidate: resources }),
   });
+// Resolves once the web's membership (from /api/game-status) matches the server's binding.
+const waitForMember = () =>
+  new Promise((resolve) => {
+    const expected = gameMemberKey(serverMember());
+    let unsubscribe = () => {};
+    const check = () => {
+      const state = store.getState();
+      const current = gameMemberKey(selectGameMembership(state));
+      if (current === expected && (expected || state.game.membership === 'none')) {
+        unsubscribe();
+        resolve();
+      }
+    };
+    unsubscribe = store.subscribe(check);
+    check();
+  });
+const bind = (value) => {
+  membership = value;
+  saveMembership();
+  invalidate(['game-status']);
+  return waitForMember();
+};
+const entry = (alert, generation) => ({
+  recipientMemberId: null,
+  recipientLabel: null,
+  sourceMemberId: null,
+  sourceLabel: null,
+  ...alert,
+  generation,
+  createdAt: new Date().toISOString(),
+});
 window.fetch = async (url, options = {}) => {
   const parsed = new URL(url, window.location.origin);
   let value = [];
+  if (parsed.pathname === '/api/game-status') {
+    const member = serverMember();
+    if (!member) return new Response('{}', { status: 403 });
+    value = {
+      gameSessionId: member.gameSessionId,
+      memberId: member.memberId,
+      role: member.role,
+      number: member.number,
+      displayName: 'Audit member',
+      controllerActive: true,
+      serverTime: new Date().toISOString(),
+      hash: '0'.repeat(32),
+      status: {
+        speedhunt: { active: false },
+        break: { active: false },
+        ...projections[member.role],
+      },
+    };
+  }
+  if (parsed.pathname === '/api/game-jokers') value = { inventories: [], reservations: [] };
   if (parsed.pathname === '/api/game-notifications') {
     if (failing) return new Response('{}', { status: typeof failing === 'number' ? failing : 503 });
-    const deviceId = Number(parsed.searchParams.get('sessionDeviceId'));
-    const session = getSession(deviceId);
+    // Members read their own session only; naming another one answers 403.
+    const member = serverMember();
+    const gameSessionId = Number(parsed.searchParams.get('gameSessionId'));
+    if (!member || gameSessionId !== member.gameSessionId)
+      return new Response('{}', { status: 403 });
+    const session = getSession(gameSessionId);
     const generation = parsed.searchParams.get('generation');
     if (generation && generation !== session.generation) return new Response('{}', { status: 409 });
     const offset = Number(parsed.searchParams.get('after') || 0);
     const limit = Number(parsed.searchParams.get('limit') || 100);
-    const personalSourceDeviceId =
-      trackerAccess &&
-      ['player', 'supporter', 'hunter'].includes(serverUser.attributes.traccarToolUserRole)
-        ? (serverUser.attributes.traccarToolAssignedDeviceId ?? null)
-        : null;
     const eligible = session.records.filter((item) =>
-      canReceiveGameAlert(item, serverUser, personalSourceDeviceId),
+      canReceiveGameAlert({ ...item, gameSessionId }, member),
     );
     const items = eligible.slice(offset, offset + limit);
     value = {
-      version: 2,
-      sessionDeviceId: deviceId,
       generation: session.generation,
-      personalSourceDeviceId,
+      resetAt: null,
       items,
       nextCursor: String(offset + items.length),
       hasMore: offset + items.length < eligible.length,
@@ -122,6 +193,7 @@ store.dispatch(sessionActions.updateServer({ attributes: {} }));
 store.dispatch(sessionActions.updateUser(serverUser));
 const Fixture = () => {
   const user = useSelector((state) => state.session.user);
+  const member = useGameMembership();
   const eventsAvailable = useSelector((state) => state.events.items.length > 0);
   const unreadCount = useSelector(
     (state) => state.gameNotifications.items.filter((item) => !item.read).length,
@@ -136,7 +208,7 @@ const Fixture = () => {
       {user && (
         <>
           <SocketController />
-          {(!user.attributes['ui.disableEvents'] || gameAlertSessionDeviceId(user)) && (
+          {(!user.attributes['ui.disableEvents'] || member) && (
             <MapNotification
               enabled={(!user.attributes['ui.disableEvents'] && eventsAvailable) || unreadCount > 0}
               unreadCount={unreadCount}
@@ -188,6 +260,9 @@ window.notificationAudit = {
   get history() {
     return store.getState().gameNotifications;
   },
+  get member() {
+    return selectGameMembership(store.getState());
+  },
   login() {
     store.dispatch(sessionActions.updateUser(serverUser));
   },
@@ -195,17 +270,15 @@ window.notificationAudit = {
     store.dispatch(sessionActions.updateUser(null));
   },
   setSession(id) {
-    updateUser({ traccarToolSessionDeviceId: id });
+    return bind({ ...(membership ?? { role: 'player' }), gameSessionId: id });
   },
+  // A role change makes a new member; a role that is not a member role unbinds the account (403).
   setRole(role) {
-    updateUser({ traccarToolUserRole: role });
+    return bind(memberIds[role] ? { gameSessionId: membership?.gameSessionId ?? 3, role } : null);
   },
-  setAssignedDevice(id) {
-    updateUser({ traccarToolAssignedDeviceId: id });
-  },
-  setTrackerAccess(value) {
-    trackerAccess = value;
-    invalidate();
+  // A tracker replacement keeps the member: the membership does not change.
+  replaceTracker() {
+    return bind(membership && { ...membership });
   },
   disableEvents(value) {
     updateUser({ 'ui.disableEvents': value });
@@ -230,40 +303,28 @@ window.notificationAudit = {
   nativeEvent(event) {
     sockets.at(-1)?.onmessage?.({ data: JSON.stringify({ events: [event] }) });
   },
-  emit(alerts, deviceId = 900) {
-    const session = getSession(deviceId);
+  emit(alerts, gameSessionId = 3) {
+    const session = getSession(gameSessionId);
     for (const alert of alerts)
-      if (!session.records.some((entry) => entry.id === alert.id))
-        session.records.push({
-          ...alert,
-          gameStateDeviceId: deviceId,
-          generation: session.generation,
-        });
+      if (!session.records.some((record) => record.id === alert.id))
+        session.records.push(entry(alert, session.generation));
     saveServer();
     invalidate();
   },
-  reset(deviceId = 900, alerts = []) {
+  reset(gameSessionId = 3, alerts = []) {
     const generation = window.crypto.randomUUID();
-    sessions[deviceId] = {
+    sessions[gameSessionId] = {
       generation,
-      records: alerts.map((alert) => ({ ...alert, generation, gameStateDeviceId: deviceId })),
+      records: alerts.map((alert) => entry(alert, generation)),
     };
     saveServer();
     invalidate();
   },
+  // A device position that carries alerts is no notification authority.
   spoof(alert) {
     sockets.at(-1)?.onmessage?.({
       data: JSON.stringify({
-        positions: [
-          {
-            deviceId: 900,
-            attributes: {
-              traccarToolGameState: true,
-              traccarToolAlertsVersion: 1,
-              traccarToolAlerts: JSON.stringify([alert]),
-            },
-          },
-        ],
+        positions: [{ deviceId: 900, attributes: { alerts: JSON.stringify([alert]) } }],
       }),
     });
   },

@@ -1,11 +1,12 @@
 import { createSlice } from '@reduxjs/toolkit';
 
+// The proximity circles of the member named by `memberKey` (session, member and role).
 const { reducer, actions } = createSlice({
   name: 'gameProximity',
-  initialState: { sessionDeviceId: null, circles: [] },
+  initialState: { memberKey: null, circles: [] },
   reducers: {
     refresh(state, action) {
-      state.sessionDeviceId = action.payload.sessionDeviceId;
+      state.memberKey = action.payload.memberKey;
       state.circles = action.payload.circles;
     },
   },

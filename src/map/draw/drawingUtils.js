@@ -199,11 +199,15 @@ export const canDeleteDrawingInMode = (mode, drawing, user) => {
   return false;
 };
 
+/**
+ * The signed-in account with its game role (`gameRole`), which comes from the membership of /api/game-status
+ * and never from user attributes; null without membership.
+ */
+export const withGameRole = (user, role) => (user ? { ...user, gameRole: role ?? null } : user);
+
+/** Spectators only watch: they draw nothing. The server decides the sharing of each drawing. */
 export const canEditDrawings = (user) =>
-  Boolean(
-    user?.administrator ||
-    (!user?.disableDrawings && user?.attributes?.traccarToolUserRole !== 'spectator'),
-  );
+  Boolean(user?.administrator || (!user?.disableDrawings && user?.gameRole !== 'spectator'));
 
 export const canEditDrawing = (drawing, user) => {
   if (!drawing || !user || !canEditDrawings(user)) return false;
