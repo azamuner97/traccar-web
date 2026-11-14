@@ -6,7 +6,7 @@ import useGameTranslation from './useGameTranslation';
 
 const severities = {
   running: 'success',
-  paused: 'warning',
+  stopped: 'warning',
   disconnected: 'error',
   loading: 'info',
   error: 'error',
@@ -14,13 +14,13 @@ const severities = {
 
 const texts = {
   running: 'gameStateRunning',
-  paused: 'gameStatePaused',
+  stopped: 'gameStateStopped',
   disconnected: 'gameStateDisconnected',
   loading: 'gameStateLoading',
   error: 'gameStateError',
 };
 
-/** Whether the game runs (a Tool controls it), and whether this page is connected and current. */
+/** Whether the game runs (its game state), and whether this page is connected and current. */
 const GameStateCard = ({ game, socket, showSpeedhunt }) => {
   const t = useGameTranslation();
   const error = game.statusError || game.error;
@@ -28,7 +28,7 @@ const GameStateCard = ({ game, socket, showSpeedhunt }) => {
     socket,
     loaded: game.loaded,
     error,
-    controllerActive: game.status?.controllerActive,
+    running: game.status?.running,
   });
   const speedhunt = game.status?.status?.speedhunt;
   return (

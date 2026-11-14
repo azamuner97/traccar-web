@@ -68,7 +68,7 @@ const GamePage = () => {
             <SpeedhuntHistoryCard
               key={JSON.stringify([membership.userId, gameSessionId, membership.memberId])}
               gameSessionId={gameSessionId}
-              controllerActive={game.status.controllerActive}
+              running={game.status.running}
               refreshedAt={game.refreshedAt}
               statusError={game.statusError}
             />

@@ -44,7 +44,7 @@ const actionLabels = {
 };
 
 const reasonTexts = {
-  paused: 'gameReasonPaused',
+  stopped: 'gameReasonStopped',
   caught: 'gameReasonCaught',
   open: 'gameReasonOpenParticipant',
   onBreak: 'gameReasonParticipantBreak',
@@ -195,7 +195,7 @@ const HunterGameView = ({ game, controls }) => {
   const [confirming, setConfirming] = useState(null);
 
   const status = game.status?.status || {};
-  const controllerActive = game.status?.controllerActive === true;
+  const running = game.status?.running === true;
   const participants = participantsView(status, game.offsetMs, now);
   // Hunters share one pool of speedhunt jokers; spectators do not read it.
   const pool = controls ? speedhuntPoolView(game.jokers) : null;
@@ -210,7 +210,7 @@ const HunterGameView = ({ game, controls }) => {
         participants,
         offsetMs: game.offsetMs,
         now,
-        controllerActive,
+        running,
         connected: socket !== false,
       });
 
@@ -276,7 +276,7 @@ const HunterGameView = ({ game, controls }) => {
                   limits={status.limits}
                   actions={speedhuntActions(participant, {
                     requests,
-                    controllerActive,
+                    running,
                     limits: status.limits,
                     lastSpeedhuntMemberId: status.lastSpeedhuntMemberId,
                     pool,

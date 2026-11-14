@@ -122,7 +122,7 @@ export const activeHunterLiveShares = (game, user, now) => {
   if (
     gameMembership(user, game)?.role !== 'hunter' ||
     game.statusError ||
-    !game.status.controllerActive ||
+    !game.status.running ||
     !Array.isArray(game.status.status?.liveShares)
   ) {
     return [];
@@ -179,11 +179,14 @@ export const breakView = (published, offsetMs, now = Date.now()) => {
     : { state: 'ending', startedAt, endsAt: published.endsAt, remainingMs: 0 };
 };
 
-/** disconnected (no live connection), loading, error, paused (no Tool runs the game) or running. */
-export const connectionState = ({ socket, loaded, error, controllerActive }) => {
+/**
+ * disconnected (no live connection), loading, error, stopped or running: the game state, never whether a Tool
+ * is connected right now.
+ */
+export const connectionState = ({ socket, loaded, error, running }) => {
   if (socket === false) return 'disconnected';
   if (!loaded) return error ? 'error' : 'loading';
-  return controllerActive ? 'running' : 'paused';
+  return running ? 'running' : 'stopped';
 };
 
 const count = (value) => (Number.isSafeInteger(value) && value > 0 ? value : 0);
@@ -374,14 +377,14 @@ export const jokerAvailability = (
     inventory,
     requests,
     status,
-    controllerActive,
+    running,
     offsetMs,
     now = Date.now(),
     pings = [],
     reservations = [],
   },
 ) => {
-  if (!controllerActive) return { enabled: false, reason: 'paused' };
+  if (!running) return { enabled: false, reason: 'stopped' };
   if (requests.some((item) => item.type === JOKER_REQUESTS[type] && isOpenRequest(item))) {
     return { enabled: false, reason: 'open' };
   }
@@ -460,7 +463,7 @@ export const fixedLiveMinutes = (limits) => {
 
 export const speedhuntActions = (
   participant,
-  { requests, controllerActive, lastSpeedhuntMemberId, limits, pool = null },
+  { requests, running, lastSpeedhuntMemberId, limits, pool = null },
 ) => {
   const open = requests.some(
     (item) =>
@@ -468,13 +471,12 @@ export const speedhuntActions = (
       SPEEDHUNT_REQUESTS.includes(item.type) &&
       isOpenRequest(item),
   );
-  const blocked =
-    !controllerActive || participant.caught || open || participant.speedhunt.revision === null;
+  const blocked = !running || participant.caught || open || participant.speedhunt.revision === null;
   const ping = !blocked && participant.break.state !== 'active' && !participant.speedhunt.live;
   // A ping that starts a speedhunt needs a joker of the hunters' pool; the server reserves it.
   const noJoker = participant.speedhunt.startsRun && pool !== null && pool.available <= 0;
   let reason = null;
-  if (!controllerActive) reason = 'paused';
+  if (!running) reason = 'stopped';
   else if (participant.caught) reason = 'caught';
   else if (open) reason = 'open';
   else if (participant.break.state === 'active') reason = 'onBreak';
@@ -514,12 +516,12 @@ export const timetableSlotsView = (slots, offsetMs, now = Date.now()) => {
 
 /**
  * The timetable pings a member sees, with the state to show: scheduled, due (its time has passed and the
- * Tool sends it), disconnected (its time has passed while no Tool runs or this page is offline), sent,
+ * Tool sends it), disconnected (its time has passed while the game is stopped or this page is offline), sent,
  * skipped or failed; a participant's break or caught state can mark a ping as protected or out.
  */
 export const timetableView = (
   pings,
-  { participants = [], offsetMs, now = Date.now(), controllerActive, connected = true } = {},
+  { participants = [], offsetMs, now = Date.now(), running, connected = true } = {},
 ) => {
   const byMember = new Map(participants.map((item) => [item.memberId, item]));
   const current = serverNow(offsetMs, now);
@@ -548,8 +550,7 @@ export const timetableView = (
           scheduled < breakEnds
         ) {
           state = 'protected';
-        } else if (scheduled <= current)
-          state = controllerActive && connected ? 'due' : 'disconnected';
+        } else if (scheduled <= current) state = running && connected ? 'due' : 'disconnected';
       }
       return {
         entryId: item.entryId,
@@ -699,7 +700,7 @@ export const validGameStatus = (value) =>
     gameRoles.has(value.role) &&
     typeof value.hash === 'string' &&
     /^[0-9a-f]{32}$/.test(value.hash) &&
-    typeof value.controllerActive === 'boolean' &&
+    typeof value.running === 'boolean' &&
     parseTime(value.serverTime) !== null &&
     value.status &&
     typeof value.status === 'object',

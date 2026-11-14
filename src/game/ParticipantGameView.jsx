@@ -29,7 +29,6 @@ import {
   jokerAvailability,
   ownFakeRunTokens,
   plannedBreaksView,
-  remainingMs,
   requestGameSync,
   requestState,
   reservationsView,
@@ -55,7 +54,7 @@ const jokerLabels = {
 };
 
 const reasonTexts = {
-  paused: 'gameReasonPaused',
+  stopped: 'gameReasonStopped',
   open: 'gameReasonOpen',
   none: 'gameReasonNone',
   onBreak: 'gameReasonOnBreak',
@@ -309,7 +308,7 @@ const ReservationsCard = ({ reservations, onCancel, busy }) => {
   );
 };
 
-const RequestsCard = ({ requests, memberId, offsetMs, now, onCancel, busy }) => {
+const RequestsCard = ({ requests, memberId, onCancel, busy }) => {
   const t = useGameTranslation();
   return (
     <Card variant="outlined">
@@ -320,14 +319,7 @@ const RequestsCard = ({ requests, memberId, offsetMs, now, onCancel, busy }) => 
         <List dense>
           {requests.map((request, index) => {
             const state = requestState(request);
-            const left = isOpenRequest(request)
-              ? remainingMs(request.expiresAt, offsetMs, now)
-              : null;
-            const details = [
-              formatClock(request.createdAt, true),
-              request.message,
-              left !== null ? t('gameRequestExpires', { time: formatCountdown(left) }) : null,
-            ]
+            const details = [formatClock(request.createdAt, true), request.message]
               .filter(Boolean)
               .join(' · ');
             const cancellable = canCancelRequest(request, memberId);
@@ -393,7 +385,7 @@ const ParticipantGameView = ({ game, membership }) => {
   const [breakPlanning, setBreakPlanning] = useState(false);
 
   const status = game.status?.status || {};
-  const controllerActive = game.status?.controllerActive === true;
+  const running = game.status?.running === true;
   const inventory = inventoryByType(game.jokers);
   const requests = sortedRequests(game.requests);
   const cancellableRequestIds = new Set(
@@ -423,7 +415,7 @@ const ParticipantGameView = ({ game, membership }) => {
     ],
     offsetMs: game.offsetMs,
     now,
-    controllerActive,
+    running,
     connected: socket !== false,
   });
   // Timetable pings that already carry the member's fake (requested or armed).
@@ -445,7 +437,7 @@ const ParticipantGameView = ({ game, membership }) => {
         inventory,
         requests,
         status,
-        controllerActive,
+        running,
         offsetMs: game.offsetMs,
         now,
         pings,
@@ -539,8 +531,6 @@ const ParticipantGameView = ({ game, membership }) => {
       <RequestsCard
         requests={requests}
         memberId={membership.memberId}
-        offsetMs={game.offsetMs}
-        now={now}
         busy={busy}
         onCancel={cancelRequest}
       />

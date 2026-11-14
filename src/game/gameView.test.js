@@ -52,7 +52,7 @@ const gameStatus = (role, changes = {}) => ({
   role,
   number: 1,
   displayName: 'Member',
-  controllerActive: true,
+  running: true,
   serverTime: '2026-11-09T12:00:00Z',
   hash: '0123456789abcdef0123456789abcdef',
   status: {},
@@ -86,7 +86,7 @@ test('hunter live shares follow the current account, member, controller and serv
     [always, timed],
   );
   assert.deepEqual(activeHunterLiveShares({ ...game, statusError: 'offline' }, hunter, now), []);
-  const inactive = { ...game, status: { ...game.status, controllerActive: false } };
+  const inactive = { ...game, status: { ...game.status, running: false } };
   assert.deepEqual(activeHunterLiveShares(inactive, hunter, now), []);
   assert.deepEqual(activeHunterLiveShares({ ...game, status: null }, hunter, now), []);
 });
@@ -233,15 +233,12 @@ test('a break past its deadline shows as ending until the Tool ends it', () => {
   assert.equal(breakView(undefined, 0).state, 'none');
 });
 
-test('connection states distinguish disconnected, paused and running', () => {
-  assert.equal(
-    connectionState({ socket: false, loaded: true, controllerActive: true }),
-    'disconnected',
-  );
+test('connection states distinguish disconnected, stopped and running', () => {
+  assert.equal(connectionState({ socket: false, loaded: true, running: true }), 'disconnected');
   assert.equal(connectionState({ socket: true, loaded: false }), 'loading');
   assert.equal(connectionState({ socket: true, loaded: false, error: 'x' }), 'error');
-  assert.equal(connectionState({ socket: true, loaded: true, controllerActive: false }), 'paused');
-  assert.equal(connectionState({ socket: null, loaded: true, controllerActive: true }), 'running');
+  assert.equal(connectionState({ socket: true, loaded: true, running: false }), 'stopped');
+  assert.equal(connectionState({ socket: null, loaded: true, running: true }), 'running');
 });
 
 test('inventories default to zero and ignore unknown types and bad numbers', () => {
@@ -381,13 +378,13 @@ test('joker availability never depends on whom a speedhunt targets', () => {
       { type: 'break', available: 1 },
     ],
   });
-  const base = { inventory, requests: [], status: {}, controllerActive: true, offsetMs: 0, now: 0 };
+  const base = { inventory, requests: [], status: {}, running: true, offsetMs: 0, now: 0 };
   assert.deepEqual(jokerAvailability('break', base), {
     enabled: true,
     reason: null,
     now: { enabled: true, reason: null },
   });
-  assert.equal(jokerAvailability('break', { ...base, controllerActive: false }).reason, 'paused');
+  assert.equal(jokerAvailability('break', { ...base, running: false }).reason, 'stopped');
   assert.equal(
     jokerAvailability('break', {
       ...base,
@@ -510,7 +507,7 @@ test('planned breaks: from the status and open requests, cancellable while held 
 
 test('answers are validated and texts filled', () => {
   const valid = gameStatus('player', {
-    controllerActive: false,
+    running: false,
     status: { speedhunt: { active: false } },
   });
   assert.ok(validGameStatus(valid));
@@ -521,7 +518,7 @@ test('answers are validated and texts filled', () => {
     { role: 'operator' },
     { hash: 'not-a-hash' },
     { status: null },
-    { controllerActive: 'yes' },
+    { running: 'yes' },
   ]) {
     assert.ok(!validGameStatus({ ...valid, ...changes }));
   }
@@ -600,7 +597,7 @@ test('hunters see every participant with the named speedhunt state and breaks', 
 
 test('hunter speedhunt controls offer static and timed live pings', () => {
   const [anna, ben, cleo, dan] = participantsView(hunterStatus, 0, at('2026-11-09T12:00:00Z'));
-  const base = { requests: [], controllerActive: true, limits: { fixedLiveMinutes: 5 } };
+  const base = { requests: [], running: true, limits: { fixedLiveMinutes: 5 } };
   assert.deepEqual(speedhuntActions(anna, base), {
     speedhuntStaticPing: true,
     speedhuntLivePing: true,
@@ -619,14 +616,14 @@ test('hunter speedhunt controls offer static and timed live pings', () => {
   assert.equal(open.speedhuntStaticPing, false);
   assert.equal(open.speedhuntLivePing, false);
   assert.equal(open.reason, 'open');
-  assert.equal(speedhuntActions(anna, { ...base, controllerActive: false }).reason, 'paused');
+  assert.equal(speedhuntActions(anna, { ...base, running: false }).reason, 'stopped');
 });
 
 test('a ping that starts a speedhunt needs a joker of the hunters pool', () => {
   const [anna] = participantsView(hunterStatus, 0, at('2026-11-09T12:00:00Z'));
   const starting = { ...anna, speedhunt: { ...anna.speedhunt, startsRun: true } };
   const running = { ...anna, speedhunt: { ...anna.speedhunt, startsRun: false, running: true } };
-  const base = { requests: [], controllerActive: true, limits: { fixedLiveMinutes: 5 } };
+  const base = { requests: [], running: true, limits: { fixedLiveMinutes: 5 } };
   const empty = speedhuntPoolView({
     inventories: [
       { memberId: null, type: 'speedhunt', granted: 2, used: 2, reserved: 0, available: 0 },
@@ -662,7 +659,7 @@ test('repeat targets use separate static and live approvals and honor hard block
     limitEnforcement: 'warn',
     requestApprovals: { speedhuntStaticPing: true, speedhuntLivePing: false },
   };
-  const base = { requests: [], controllerActive: true, lastSpeedhuntMemberId: 11, limits };
+  const base = { requests: [], running: true, lastSpeedhuntMemberId: 11, limits };
   assert.deepEqual(speedhuntActions(participant, base), {
     speedhuntStaticPing: true,
     speedhuntLivePing: false,
@@ -723,7 +720,7 @@ test('timetable pings show scheduled, due, disconnected, sent, skipped, failed, 
     ping(11, 13, '11:57', 'scheduled'),
     ping(12, 13, '11:59', 'scheduled'),
   ];
-  const running = timetableView(pings, { participants, offsetMs: 0, now, controllerActive: true });
+  const running = timetableView(pings, { participants, offsetMs: 0, now, running: true });
   assert.deepEqual(
     running.map((item) => [item.entryId, item.state]),
     [
@@ -743,13 +740,13 @@ test('timetable pings show scheduled, due, disconnected, sent, skipped, failed, 
   assert.equal(anna.name, 'Anna');
   assert.equal(anna.remainingMs, 300000);
   assert.ok(anna.upcoming && !running.find((item) => item.entryId === 4).upcoming);
-  const paused = timetableView(pings, { participants, offsetMs: 0, now, controllerActive: false });
-  assert.equal(paused.find((item) => item.entryId === 4).state, 'disconnected');
+  const stopped = timetableView(pings, { participants, offsetMs: 0, now, running: false });
+  assert.equal(stopped.find((item) => item.entryId === 4).state, 'disconnected');
   const offline = timetableView(pings, {
     participants,
     offsetMs: 0,
     now,
-    controllerActive: true,
+    running: true,
     connected: false,
   });
   assert.equal(offline.find((item) => item.entryId === 4).state, 'disconnected');
@@ -778,7 +775,7 @@ test("a member's own break marks their own pings and allows no fake inside it", 
     participants: [own],
     offsetMs: 0,
     now,
-    controllerActive: true,
+    running: true,
   });
   assert.deepEqual(
     view.map((item) => [item.entryId, item.state, item.fakeAllowed]),
@@ -808,7 +805,7 @@ test('fakes: valid requests only, ping numbers within the limit, one unbound spe
   assert.equal(fakeRequest({ kind: 'timetable', latitude: 1, longitude: 2 }), null);
 
   const inventory = inventoryByType({ inventories: [{ type: 'fakePing', available: 1 }] });
-  const base = { inventory, requests: [], status: {}, controllerActive: true, offsetMs: 0, now: 0 };
+  const base = { inventory, requests: [], status: {}, running: true, offsetMs: 0, now: 0 };
   const ping = [{ fakeAllowed: true, upcoming: true }];
   const armedSpeedhunt = [{ type: 'fakePing', use: 'speedhunt', kind: 'armed' }];
   // One joker, two uses: a timetable ping needs one that can carry a fake; the next speedhunt holds one.

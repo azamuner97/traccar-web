@@ -23,7 +23,7 @@ const statusLabels = {
   finished: 'gameSpeedhuntHistoryFinished',
 };
 
-const SpeedhuntHistoryCard = ({ gameSessionId, controllerActive, refreshedAt, statusError }) => {
+const SpeedhuntHistoryCard = ({ gameSessionId, running, refreshedAt, statusError }) => {
   const t = useGameTranslation();
   const titleId = useId();
   const [history, setHistory] = useState({ runs: null, failed: false });
@@ -100,7 +100,7 @@ const SpeedhuntHistoryCard = ({ gameSessionId, controllerActive, refreshedAt, st
         )}
       </CardContent>
       {runs?.slice(0, visibleCount).map(({ runId: id, startedAt, status, pings }, index) => {
-        const runStatus = status === 'inProgress' && !controllerActive ? 'paused' : status;
+        const runStatus = status === 'inProgress' && !running ? 'paused' : status;
         const inProgress = runStatus === 'inProgress';
         const startDate = formatTime(startedAt, 'date');
         return (
