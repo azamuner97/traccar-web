@@ -4,7 +4,7 @@ import { makeStyles } from 'tss-react/mui';
 import { createRoot } from 'react-dom/client';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import { map } from '../core/MapView';
-import { useTranslation } from '../../common/components/LocalizationProvider';
+import useGameTranslation from '../../game/useGameTranslation';
 
 const useStyles = makeStyles()((theme) => ({
   button: {
@@ -23,7 +23,8 @@ const useStyles = makeStyles()((theme) => ({
 const MapNotification = ({ enabled, onClick, unreadCount = 0 }) => {
   const theme = useTheme();
   const { classes } = useStyles();
-  const t = useTranslation();
+  // The unread label is a game text (English and German only; the others fall back to English).
+  const t = useGameTranslation();
 
   const onClickRef = useRef(onClick);
   onClickRef.current = onClick;

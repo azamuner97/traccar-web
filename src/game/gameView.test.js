@@ -5,6 +5,7 @@ import {
   activeHunterLiveShares,
   breakView,
   canCancelRequest,
+  fakeStillAllowed,
   connectionState,
   fakePingNumbers,
   breakRequest,
@@ -53,6 +54,7 @@ const gameStatus = (role, changes = {}) => ({
   number: 1,
   displayName: 'Member',
   running: true,
+  timetableRunning: true,
   serverTime: '2026-11-09T12:00:00Z',
   hash: '0123456789abcdef0123456789abcdef',
   status: {},
@@ -359,6 +361,13 @@ test('requests: newest first, approval state and own cancellation', () => {
     { id: 5, status: 'succeeded', requesterMemberId: 40 },
     { id: 'bad' },
   ]);
+  // The server decides whether a request in progress can still be cancelled (409 when a Tool carries it out).
+  assert.ok(canCancelRequest({ id: 6, status: 'approved', requesterMemberId: 40 }, 40));
+  assert.ok(canCancelRequest({ id: 7, status: 'executing', requesterMemberId: 40 }, 40));
+  assert.ok(!canCancelRequest({ id: 7, status: 'executing', requesterMemberId: 41 }, 40));
+  for (const status of ['failed', 'rejected', 'cancelled', 'expired']) {
+    assert.ok(!canCancelRequest({ id: 8, status, requesterMemberId: 40 }, 40), status);
+  }
   assert.deepEqual(
     requests.map((item) => item.id),
     [5, 3],
@@ -519,6 +528,7 @@ test('answers are validated and texts filled', () => {
     { hash: 'not-a-hash' },
     { status: null },
     { running: 'yes' },
+    { timetableRunning: undefined },
   ]) {
     assert.ok(!validGameStatus({ ...valid, ...changes }));
   }
@@ -695,7 +705,7 @@ test('hunter timetable slots collapse simultaneous pings and advance the countdo
   ]);
 });
 
-test('timetable pings show scheduled, due, disconnected, sent, skipped, failed, break and out', () => {
+test('timetable pings show scheduled, due, stopped, notRunning, offline, sent, skipped, failed, break and out', () => {
   const now = at('2026-11-09T12:00:00Z');
   const participants = participantsView(hunterStatus, 0, now);
   const ping = (entryId, memberId, time, state) => ({
@@ -720,7 +730,13 @@ test('timetable pings show scheduled, due, disconnected, sent, skipped, failed, 
     ping(11, 13, '11:57', 'scheduled'),
     ping(12, 13, '11:59', 'scheduled'),
   ];
-  const running = timetableView(pings, { participants, offsetMs: 0, now, running: true });
+  const running = timetableView(pings, {
+    participants,
+    offsetMs: 0,
+    now,
+    running: true,
+    timetableRunning: true,
+  });
   assert.deepEqual(
     running.map((item) => [item.entryId, item.state]),
     [
@@ -740,16 +756,93 @@ test('timetable pings show scheduled, due, disconnected, sent, skipped, failed, 
   assert.equal(anna.name, 'Anna');
   assert.equal(anna.remainingMs, 300000);
   assert.ok(anna.upcoming && !running.find((item) => item.entryId === 4).upcoming);
-  const stopped = timetableView(pings, { participants, offsetMs: 0, now, running: false });
-  assert.equal(stopped.find((item) => item.entryId === 4).state, 'disconnected');
-  const offline = timetableView(pings, {
-    participants,
-    offsetMs: 0,
-    now,
-    running: true,
-    connected: false,
+  // A past-due scheduled ping: sent now only while the game runs and the timetable's execution is on.
+  const pastDue = (options) =>
+    timetableView(pings, { participants, offsetMs: 0, now, ...options })
+      .filter((item) => item.entryId === 4 || item.entryId === 11 || item.entryId === 8)
+      .map((item) => [item.entryId, item.state]);
+  assert.deepEqual(pastDue({ running: false, timetableRunning: false }), [
+    [11, 'stopped'],
+    [4, 'stopped'],
+    [8, 'scheduled'],
+  ]);
+  assert.deepEqual(pastDue({ running: true, timetableRunning: false }), [
+    [11, 'notRunning'],
+    [4, 'notRunning'],
+    [8, 'scheduled'],
+  ]);
+  assert.deepEqual(pastDue({ running: true }), [
+    [11, 'notRunning'],
+    [4, 'notRunning'],
+    [8, 'scheduled'],
+  ]);
+  // A page without its connection cannot know: whatever the last status said, it shows connection lost.
+  for (const options of [
+    { running: true, timetableRunning: true },
+    { running: false, timetableRunning: false },
+  ]) {
+    assert.deepEqual(pastDue({ ...options, connected: false }), [
+      [11, 'offline'],
+      [4, 'offline'],
+      [8, 'scheduled'],
+    ]);
+  }
+  // Pings that are over keep their outcome whatever the game does.
+  assert.equal(
+    timetableView(pings, { participants, offsetMs: 0, now, running: false, connected: false })[0]
+      .state,
+    'sent',
+  );
+});
+
+test('a fake is offered only for a ping more than 15 s ahead, by the clock and not the last read', () => {
+  const read = at('2026-11-09T12:00:00Z');
+  const ping = (entryId, time, fakeAllowed = true) => ({
+    entryId,
+    memberId: 11,
+    scheduledAt: `2026-11-09T${time}Z`,
+    state: 'scheduled',
+    stateAt: null,
+    fakeAllowed,
   });
-  assert.equal(offline.find((item) => item.entryId === 4).state, 'disconnected');
+  // The server allowed fakes on all three when the page read the timetable at 12:00:00.
+  const pings = [
+    ping(1, '12:00:30'),
+    ping(2, '12:01:00'),
+    ping(3, '12:05:00'),
+    ping(4, '12:05:00', false),
+  ];
+  const allowed = (now, offsetMs = 0) =>
+    timetableView(pings, { offsetMs, now, running: true, timetableRunning: true })
+      .filter((item) => item.fakeAllowed)
+      .map((item) => item.entryId);
+  assert.deepEqual(allowed(read), [1, 2, 3]);
+  assert.deepEqual(allowed(read + 14999), [1, 2, 3], '15.001 s ahead is still allowed');
+  assert.deepEqual(allowed(read + 15000), [2, 3], 'exactly 15 s ahead is too late');
+  assert.deepEqual(allowed(read + 40000), [2, 3], 'the first ping is past, the second 20 s ahead');
+  assert.deepEqual(allowed(read + 50000), [3], 'the second ping is 10 s ahead');
+  assert.deepEqual(allowed(read + 60000), [3], 'a ping whose time has come is never offered');
+  // The server's clock decides: this device is 50 s behind it.
+  assert.deepEqual(allowed(read, 50000), [3]);
+  assert.ok(fakeStillAllowed(pings[2], 0, read + 284999));
+  assert.ok(!fakeStillAllowed(pings[2], 0, read + 285000));
+  assert.ok(!fakeStillAllowed(pings[3], 0, read));
+  assert.ok(!fakeStillAllowed({ fakeAllowed: true, scheduledAt: 'bad' }, 0, read));
+  assert.ok(!fakeStillAllowed(undefined, 0, read));
+  // Fake planning offers the timetable only while one of these pings is still allowed.
+  const inventory = inventoryByType({ inventories: [{ type: 'fakePing', available: 1 }] });
+  const timetableUse = (now) =>
+    jokerAvailability('fakePing', {
+      inventory,
+      requests: [],
+      status: {},
+      running: true,
+      offsetMs: 0,
+      now,
+      pings: timetableView([pings[0]], { offsetMs: 0, now, running: true, timetableRunning: true }),
+    }).uses.timetable;
+  assert.deepEqual(timetableUse(read), { enabled: true, reason: null });
+  assert.deepEqual(timetableUse(read + 20000), { enabled: false, reason: 'noPing' });
 });
 
 test("a member's own break marks their own pings and allows no fake inside it", () => {

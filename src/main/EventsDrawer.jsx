@@ -22,6 +22,7 @@ import { eventsActions, gameNotificationsActions } from '../store';
 import { formatGameNotificationTime, mergeNotificationEntries } from './gameNotificationHistory';
 import useFeatures from '../common/util/useFeatures';
 import { requestGameNotificationSync } from './gameNotificationSync';
+import useGameTranslation from '../game/useGameTranslation';
 
 const useStyles = makeStyles()((theme) => ({
   drawer: {
@@ -41,6 +42,8 @@ const EventsDrawer = ({ open, onClose }) => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const t = useTranslation();
+  // Game texts exist in English and German only; the others fall back to English.
+  const gt = useGameTranslation();
   const features = useFeatures();
 
   const devices = useSelector((state) => state.devices.items);
@@ -99,7 +102,7 @@ const EventsDrawer = ({ open, onClose }) => {
         <IconButton
           size="small"
           color="inherit"
-          aria-label={t('gameNotificationsClearHistory')}
+          aria-label={gt('gameNotificationsClearHistory')}
           onClick={() => {
             dispatch(eventsActions.deleteAll());
             dispatch(gameNotificationsActions.deleteAll({ key: history.key, now: Date.now() }));
@@ -107,16 +110,16 @@ const EventsDrawer = ({ open, onClose }) => {
         >
           <DeleteIcon fontSize="small" />
         </IconButton>
-        <IconButton size="small" aria-label={t('gameNotificationsCloseHistory')} onClick={onClose}>
+        <IconButton size="small" aria-label={gt('gameNotificationsCloseHistory')} onClick={onClose}>
           <CloseIcon fontSize="small" />
         </IconButton>
       </Toolbar>
-      {history.loading && <Typography sx={{ px: 2 }}>{t('gameNotificationsLoading')}</Typography>}
+      {history.loading && <Typography sx={{ px: 2 }}>{gt('gameNotificationsLoading')}</Typography>}
       {history.error && <Alert severity="warning">{history.error}</Alert>}
       <List className={classes.drawer} dense>
         {entries.length === 0 && (
           <ListItem>
-            <ListItemText primary={t('gameNotificationsEmpty')} />
+            <ListItemText primary={gt('gameNotificationsEmpty')} />
           </ListItem>
         )}
         {entries.slice((currentPage - 1) * 100, currentPage * 100).map(({ kind, item: event }) =>
@@ -126,7 +129,7 @@ const EventsDrawer = ({ open, onClose }) => {
               secondaryAction={
                 <IconButton
                   size="small"
-                  aria-label={t('gameNotificationsDeleteEntry')}
+                  aria-label={gt('gameNotificationsDeleteEntry')}
                   onClick={() =>
                     dispatch(gameNotificationsActions.delete({ key: history.key, id: event.id }))
                   }
@@ -149,7 +152,7 @@ const EventsDrawer = ({ open, onClose }) => {
               />
               <IconButton
                 size="small"
-                aria-label={t('gameNotificationsDeleteEntry')}
+                aria-label={gt('gameNotificationsDeleteEntry')}
                 onClick={(e) => {
                   e.stopPropagation();
                   dispatch(eventsActions.delete(event));
@@ -166,7 +169,7 @@ const EventsDrawer = ({ open, onClose }) => {
           count={pages}
           page={currentPage}
           onChange={(_event, value) => setPage(value)}
-          aria-label={t('gameNotificationsHistoryPages')}
+          aria-label={gt('gameNotificationsHistoryPages')}
           sx={{ px: 2, pb: 2 }}
         />
       )}

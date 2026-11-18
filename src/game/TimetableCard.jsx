@@ -26,6 +26,9 @@ const TimetableCard = ({ pings, title, showNames, planned = new Set(), onPlan })
   const upcoming = pings.filter((item) => item.upcoming).slice(0, UPCOMING_SHOWN);
   const shown = [...past, ...upcoming];
   const next = upcoming[0];
+  // `fakeAllowed` of the view already ages with the clock (no fake less than 15 s ahead).
+  const plannable = (ping) =>
+    Boolean(onPlan) && ping.upcoming && ping.fakeAllowed && !planned.has(ping.entryId);
   return (
     <Card variant="outlined">
       <CardContent sx={{ pb: 0 }}>
@@ -47,7 +50,7 @@ const TimetableCard = ({ pings, title, showNames, planned = new Set(), onPlan })
               <ListItem
                 sx={{ opacity: ping.upcoming ? 1 : 0.7 }}
                 secondaryAction={
-                  onPlan && ping.fakeAllowed && !planned.has(ping.entryId) ? (
+                  plannable(ping) ? (
                     <Button size="small" onClick={() => onPlan(ping)}>
                       {t('gameFakePlan')}
                     </Button>
@@ -77,7 +80,7 @@ const TimetableCard = ({ pings, title, showNames, planned = new Set(), onPlan })
                       )}
                     </Stack>
                   }
-                  sx={onPlan && ping.fakeAllowed ? { pr: 10 } : undefined}
+                  sx={plannable(ping) ? { pr: 10 } : undefined}
                 />
               </ListItem>
             </Fragment>

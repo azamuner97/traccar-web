@@ -211,6 +211,7 @@ const HunterGameView = ({ game, controls }) => {
         offsetMs: game.offsetMs,
         now,
         running,
+        timetableRunning: game.status?.timetableRunning === true,
         connected: socket !== false,
       });
 

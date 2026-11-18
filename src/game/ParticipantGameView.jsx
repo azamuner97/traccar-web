@@ -22,6 +22,7 @@ import {
   JOKER_TYPES,
   breakView,
   canCancelRequest,
+  fakeStillAllowed,
   formatClock,
   formatCountdown,
   inventoryByType,
@@ -416,6 +417,7 @@ const ParticipantGameView = ({ game, membership }) => {
     offsetMs: game.offsetMs,
     now,
     running,
+    timetableRunning: game.status?.timetableRunning === true,
     connected: socket !== false,
   });
   // Timetable pings that already carry the member's fake (requested or armed).
@@ -517,12 +519,15 @@ const ParticipantGameView = ({ game, membership }) => {
         planned={planned}
         onPlan={
           availability.fakePing.enabled && fakeUses?.timetable.enabled && !busy
-            ? (ping) =>
+            ? (ping) => {
+                // The list is up to a second old: the 15 s cutoff counts at the tap.
+                if (!fakeStillAllowed(ping, game.offsetMs)) return;
                 setPlanning({
                   kind: 'timetable',
                   entryId: ping.entryId,
                   runToken: runningFakeChoice(status)?.runToken,
-                })
+                });
+              }
             : undefined
         }
       />

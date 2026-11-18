@@ -24,6 +24,8 @@ export const SPEEDHUNT_REQUESTS = [
 ];
 // The highest ping a speedhunt fake may name when speedhunts have no ping limit.
 export const MAX_FAKE_PING_NUMBER = 1000;
+// The server's GameTimetableService.FAKE_CUTOFF_SECONDS: a fake needs a ping more than this far ahead.
+export const FAKE_CUTOFF_MS = 15000;
 
 const positiveId = (value) => (Number.isSafeInteger(value) && value > 0 ? value : null);
 
@@ -307,11 +309,15 @@ export const requestState = (request) =>
 
 export const isOpenRequest = (request) => OPEN_REQUEST_STATES.has(request?.status);
 
+/**
+ * The requester may try to cancel any open request. The server decides for one in progress: it allows it
+ * only when no Tool carries it out any more (no active lease, or a newer one) and answers 409 otherwise.
+ */
 export const canCancelRequest = (request, memberId) =>
   Boolean(request) &&
   positiveId(memberId) !== null &&
   request.requesterMemberId === memberId &&
-  (request.status === 'pending' || request.status === 'approved');
+  isOpenRequest(request);
 
 export const sortedRequests = (requests) =>
   (Array.isArray(requests) ? requests : [])
@@ -515,13 +521,36 @@ export const timetableSlotsView = (slots, offsetMs, now = Date.now()) => {
 };
 
 /**
- * The timetable pings a member sees, with the state to show: scheduled, due (its time has passed and the
- * Tool sends it), disconnected (its time has passed while the game is stopped or this page is offline), sent,
- * skipped or failed; a participant's break or caught state can mark a ping as protected or out.
+ * Whether a fake can still be planned on a timetable ping at `now`: the server refuses a fake on a ping
+ * less than FAKE_CUTOFF_MS ahead, so its `fakeAllowed` (true when it was read) ages with the clock.
+ */
+export const fakeStillAllowed = (ping, offsetMs, now = Date.now()) => {
+  const scheduled = parseTime(ping?.scheduledAt);
+  return (
+    ping?.fakeAllowed === true &&
+    scheduled !== null &&
+    scheduled - serverNow(offsetMs, now) > FAKE_CUTOFF_MS
+  );
+};
+
+/**
+ * The timetable pings a member sees, with the state to show: scheduled, sent, skipped or failed as the
+ * server reports them; a participant's break or caught state can mark a ping as protected or out. The server
+ * sends a ping at its time while the game runs and the timetable's execution is on (`timetableRunning`); a
+ * ping whose time has passed and that is still scheduled is due (being sent), stopped (it waits for the game),
+ * notRunning (the game runs, the timetable's execution is off) or offline (this page lost its connection, so
+ * what it shows may be outdated).
  */
 export const timetableView = (
   pings,
-  { participants = [], offsetMs, now = Date.now(), running, connected = true } = {},
+  {
+    participants = [],
+    offsetMs,
+    now = Date.now(),
+    running,
+    timetableRunning,
+    connected = true,
+  } = {},
 ) => {
   const byMember = new Map(participants.map((item) => [item.memberId, item]));
   const current = serverNow(offsetMs, now);
@@ -550,7 +579,11 @@ export const timetableView = (
           scheduled < breakEnds
         ) {
           state = 'protected';
-        } else if (scheduled <= current) state = running && connected ? 'due' : 'disconnected';
+        } else if (scheduled <= current) {
+          if (!connected) state = 'offline';
+          else if (!running) state = 'stopped';
+          else state = timetableRunning ? 'due' : 'notRunning';
+        }
       }
       return {
         entryId: item.entryId,
@@ -560,8 +593,8 @@ export const timetableView = (
         state,
         upcoming: scheduled > current,
         remainingMs: Math.max(0, scheduled - current),
-        // The server refuses a fake on a ping inside the owner's break.
-        fakeAllowed: item.fakeAllowed === true && state !== 'protected',
+        // The server refuses a fake on a ping inside the owner's break or less than 15 s ahead.
+        fakeAllowed: state !== 'protected' && fakeStillAllowed(item, offsetMs, now),
       };
     })
     .sort((a, b) => parseTime(a.scheduledAt) - parseTime(b.scheduledAt) || a.entryId - b.entryId);
@@ -701,6 +734,7 @@ export const validGameStatus = (value) =>
     typeof value.hash === 'string' &&
     /^[0-9a-f]{32}$/.test(value.hash) &&
     typeof value.running === 'boolean' &&
+    typeof value.timetableRunning === 'boolean' &&
     parseTime(value.serverTime) !== null &&
     value.status &&
     typeof value.status === 'object',

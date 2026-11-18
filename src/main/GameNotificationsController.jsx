@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useDispatch, useSelector, useStore } from 'react-redux';
 import { IconButton, Snackbar } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
-import { useTranslation } from '../common/components/LocalizationProvider';
 import { gameNotificationsActions } from '../store';
 import { gameNotificationCache } from './gameNotificationCache';
 import { gameNotificationAccountKey } from './gameNotificationHistory';
 import { selectGameMembership } from '../game/gameView';
 import useGameMembership from '../game/useGameMembership';
+import useGameTranslation from '../game/useGameTranslation';
 import { createGameNotificationSync, listenGameNotificationSync } from './gameNotificationSync';
 import {
   canReceiveGameAlert,
@@ -21,7 +21,8 @@ import {
 const GameNotificationsController = ({ playAlarm }) => {
   const dispatch = useDispatch();
   const store = useStore();
-  const t = useTranslation();
+  // Game texts exist in English and German only; the others fall back to English.
+  const t = useGameTranslation();
   // Membership comes from /api/game-status; without it there is no game journal to read.
   const membership = useGameMembership();
   const history = useSelector((state) => state.gameNotifications);

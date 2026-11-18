@@ -41,7 +41,9 @@ export const requestStateColors = {
 export const pingStateColors = {
   scheduled: 'info',
   due: 'warning',
-  disconnected: 'warning',
+  stopped: 'default',
+  notRunning: 'default',
+  offline: 'default',
   sent: 'success',
   skipped: 'default',
   failed: 'error',
