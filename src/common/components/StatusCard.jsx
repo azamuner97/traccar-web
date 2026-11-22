@@ -62,11 +62,6 @@ const useStyles = makeStyles()((theme, { desktopPadding, bottomOffset = 0 }) => 
     maxHeight: theme.dimensions.cardContentMaxHeight,
     overflow: 'auto',
   },
-  icon: {
-    width: '25px',
-    height: '25px',
-    filter: 'brightness(0) invert(1)',
-  },
   table: {
     '& .MuiTableCell-sizeSmall': {
       paddingLeft: 0,

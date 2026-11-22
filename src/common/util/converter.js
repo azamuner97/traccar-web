@@ -78,8 +78,6 @@ export const altitudeUnitString = (unit, t) => {
 
 export const altitudeFromMeters = (value, unit) => roundFloat(value * altitudeConverter(unit));
 
-export const altitudeToMeters = (value, unit) => value / altitudeConverter(unit);
-
 const volumeConverter = (unit) => {
   switch (unit) {
     case 'impGal':

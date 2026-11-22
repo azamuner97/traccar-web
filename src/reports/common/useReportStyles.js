@@ -43,14 +43,6 @@ export default makeStyles()((theme) => ({
     minWidth: 0,
     flex: `1 1 ${theme.dimensions.filterFormWidth}`,
   },
-  filterButtons: {
-    display: 'flex',
-    gap: theme.spacing(1),
-    flex: `1 1 ${theme.dimensions.filterFormWidth}`,
-  },
-  filterButton: {
-    flexGrow: 1,
-  },
   chart: {
     flexGrow: 1,
     overflow: 'hidden',

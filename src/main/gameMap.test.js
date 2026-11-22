@@ -16,6 +16,7 @@ import { devicesActions, devicesReducer } from '../store/devices.js';
 const marker = (role, number, mirror = false) => ({
   traccarToolRole: role,
   traccarToolRoleNumber: number,
+  traccarToolGameSessionId: 3,
   ...(mirror ? { traccarToolMirror: true } : {}),
 });
 const devices = {
@@ -168,45 +169,59 @@ test('live positions and selection follow the visible device collection', () => 
   assert.equal(shouldClearSelectedDevice(null, shown), false);
 });
 
-test('the own real tracker is found by its role marker, never a mirror', () => {
-  assert.equal(ownTrackerId(devices, { role: 'player', number: 1 }), 11);
-  assert.equal(ownTrackerId(devices, { role: 'supporter', number: 2 }), 21);
-  assert.equal(ownTrackerId({ 12: devices[12] }, { role: 'player', number: 1 }), null);
-  assert.equal(ownTrackerId(devices, { role: 'hunter', number: 1 }), null);
+test('the own real tracker is found by its session and role markers, never a mirror', () => {
+  const membership = { gameSessionId: 3, role: 'player', number: 1 };
+  assert.equal(ownTrackerId(devices, membership), 11);
+  assert.equal(ownTrackerId(devices, { ...membership, role: 'supporter', number: 2 }), 21);
+  assert.equal(ownTrackerId({ 12: devices[12] }, membership), null);
+  assert.equal(ownTrackerId(devices, { ...membership, role: 'hunter' }), null);
   assert.equal(ownTrackerId(devices, null), null);
 });
 
-test('markers of another session never stand for a member of this one', () => {
-  // Session 3 is the member's; session 9 also has a player 1 (catching it here must not hide it).
+test('missing, invalid, or different session markers do not match a member', () => {
   const sessions = {
-    11: { ...devices[11], attributes: { ...marker('player', 1), traccarToolGameSessionId: 3 } },
-    12: {
-      ...devices[12],
-      attributes: { ...marker('player', 1, true), traccarToolGameSessionId: 3 },
-    },
+    11: devices[11],
+    12: devices[12],
+    41: devices[41],
     51: {
+      ...devices[11],
       id: 51,
-      category: 'person',
       attributes: { ...marker('player', 1), traccarToolGameSessionId: 9 },
     },
     52: {
+      ...devices[12],
       id: 52,
-      category: 'person',
       attributes: { ...marker('player', 1, true), traccarToolGameSessionId: '9' },
     },
-    41: devices[41],
+  };
+  const unmarked = {
+    ...devices[11],
+    id: 61,
+    attributes: { traccarToolRole: 'player', traccarToolRoleNumber: 1 },
+  };
+  const invalid = {
+    ...unmarked,
+    id: 62,
+    attributes: { ...unmarked.attributes, traccarToolGameSessionId: 0 },
   };
   const shown = (filterGame) =>
-    Object.keys(filterLiveDevices(sessions, gameMapFilter(user, filterGame)));
-  assert.deepEqual(shown(game('supporter', 2, ['player:1'])), ['41', '51', '52']);
-  assert.deepEqual(shown(game('player', 1)), ['11', '41', '51', '52']);
+    Object.keys(
+      filterLiveDevices(
+        { ...sessions, 61: unmarked, 62: invalid },
+        gameMapFilter(user, filterGame),
+      ),
+    );
+  assert.deepEqual(shown(game('supporter', 2, ['player:1'])), ['41', '51', '52', '61', '62']);
+  assert.deepEqual(shown(game('player', 1)), ['11', '41', '51', '52', '61', '62']);
   assert.equal(ownTrackerId(sessions, { gameSessionId: 3, role: 'player', number: 1 }), 11);
   assert.equal(ownTrackerId(sessions, { gameSessionId: 9, role: 'player', number: 1 }), 51);
   assert.equal(
-    inGameSession(devices[11], 3),
-    true,
-    'devices set up before session markers still count',
+    ownTrackerId({ 61: unmarked, 62: invalid }, { gameSessionId: 3, role: 'player', number: 1 }),
+    null,
   );
+  assert.equal(inGameSession(unmarked, 3), false);
+  assert.equal(inGameSession(unmarked, undefined), false);
+  assert.equal(inGameSession(invalid, 3), false);
   assert.equal(inGameSession(sessions[52], 9), true);
   assert.equal(inGameSession(sessions[52], 3), false);
 });

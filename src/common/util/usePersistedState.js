@@ -6,11 +6,6 @@ const broadcast = (key, value) => {
   listeners.get(key)?.forEach((listener) => listener(value));
 };
 
-export const savePersistedState = (key, value) => {
-  window.localStorage.setItem(key, JSON.stringify(value));
-  broadcast(key, value);
-};
-
 export default (key, defaultValue) => {
   const defaultRef = useRef(defaultValue);
 

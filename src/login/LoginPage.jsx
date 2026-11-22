@@ -55,9 +55,6 @@ const useStyles = makeStyles()((theme) => ({
     gap: theme.spacing(4),
     marginTop: theme.spacing(2),
   },
-  registerButton: {
-    minWidth: 'unset',
-  },
   link: {
     cursor: 'pointer',
   },

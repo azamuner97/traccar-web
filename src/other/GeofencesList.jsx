@@ -13,11 +13,6 @@ const useStyles = makeStyles()(() => ({
     flexGrow: 1,
     overflow: 'auto',
   },
-  icon: {
-    width: '25px',
-    height: '25px',
-    filter: 'brightness(0) invert(1)',
-  },
 }));
 
 const GeofencesList = ({ onGeofenceSelected }) => {

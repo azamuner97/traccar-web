@@ -5,7 +5,7 @@ import { gameMembership } from '../game/gameView.js';
 // status (/api/game-status). The device markers traccarToolRole, traccarToolRoleNumber, traccarToolMirror and
 // traccarToolGameSessionId are presentation the Tool's device setup writes from member and mirror rows; here they
 // only map members to devices, by role and number, which identify a member within its session (numbers are never
-// reused). A device marked with another session never stands for a member of this one.
+// reused). A device must carry the matching session marker.
 
 export const mirrorDeviceAttribute = 'traccarToolMirror';
 export const gameSessionDeviceAttribute = 'traccarToolGameSessionId';
@@ -24,13 +24,10 @@ export const participantKey = (device) => {
 
 export const isMirrorDevice = (device) => device?.attributes?.[mirrorDeviceAttribute] === true;
 
-/**
- * Whether a device can stand for a member of the given session: it is marked with that session, or it carries no
- * session marker (set up before the Tool wrote one).
- */
+/** Whether a device carries the matching session marker. */
 export const inGameSession = (device, gameSessionId) => {
   const marked = normalizePositiveInteger(device?.attributes?.[gameSessionDeviceAttribute]);
-  return !marked || marked === normalizePositiveInteger(gameSessionId);
+  return marked !== null && marked === normalizePositiveInteger(gameSessionId);
 };
 
 const sessionParticipantKey = (device, gameSessionId) =>

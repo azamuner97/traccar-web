@@ -2,9 +2,14 @@
 
 ## Overview
 
-Traccar is open source server for various GPS tracking devices. This repository contains web interface for the Traccar platform. For back-end checkout [main Traccar repository](https://github.com/tananaev/traccar).
+This fork provides the web interface for the Traccar game server. It adds
+participant badges, a role-specific Game page, game alerts, proximity overlays,
+shared drawings, and multi-device replay.
 
-The app uses React, Material UI and MapLibre. For more information on how to build it please check the [web app documentation](https://www.traccar.org/build-web-app/).
+The server pins the web revision used in each build. See the server's
+[development instructions](https://github.com/azamuner97/traccar/blob/project/AGENTS.md)
+for local setup and verification. Upstream web build documentation is available
+on the [Traccar website](https://www.traccar.org/build-web-app/).
 
 ## Team
 

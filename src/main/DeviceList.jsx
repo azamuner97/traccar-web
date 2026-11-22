@@ -12,10 +12,6 @@ const useStyles = makeStyles()((theme) => ({
     height: '100%',
     direction: theme.direction,
   },
-  listInner: {
-    position: 'relative',
-    margin: theme.spacing(1.5, 0),
-  },
 }));
 
 const DeviceList = ({ devices }) => {

@@ -45,11 +45,6 @@ const useStyles = makeStyles()((theme) => ({
     height: '25px',
     filter: 'brightness(0) invert(1)',
   },
-  batteryText: {
-    fontSize: '0.75rem',
-    fontWeight: 'normal',
-    lineHeight: '0.875rem',
-  },
   success: {
     color: theme.palette.success.main,
   },

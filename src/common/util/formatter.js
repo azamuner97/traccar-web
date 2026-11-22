@@ -1,7 +1,4 @@
 import dayjs from 'dayjs';
-import duration from 'dayjs/plugin/duration';
-import relativeTime from 'dayjs/plugin/relativeTime';
-import localizedFormat from 'dayjs/plugin/localizedFormat';
 
 import {
   altitudeFromMeters,
@@ -14,10 +11,6 @@ import {
   volumeUnitString,
 } from './converter';
 import { prefixString } from './stringUtils';
-
-dayjs.extend(duration);
-dayjs.extend(relativeTime);
-dayjs.extend(localizedFormat);
 
 export const formatBoolean = (value, t) => (value ? t('sharedYes') : t('sharedNo'));
 
@@ -148,16 +141,6 @@ export const getStatusColor = (status) => {
     default:
       return 'neutral';
   }
-};
-
-export const getBatteryStatus = (batteryLevel) => {
-  if (batteryLevel >= 70) {
-    return 'success';
-  }
-  if (batteryLevel > 30) {
-    return 'warning';
-  }
-  return 'error';
 };
 
 export const formatNotificationTitle = (t, notification, includeId) => {
