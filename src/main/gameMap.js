@@ -7,8 +7,8 @@ import { gameMembership } from '../game/gameView.js';
 // only map members to devices, by role and number, which identify a member within its session (numbers are never
 // reused). A device must carry the matching session marker.
 
-export const mirrorDeviceAttribute = 'traccarToolMirror';
-export const gameSessionDeviceAttribute = 'traccarToolGameSessionId';
+const mirrorDeviceAttribute = 'traccarToolMirror';
+const gameSessionDeviceAttribute = 'traccarToolGameSessionId';
 const participantRoles = new Set(['player', 'supporter']);
 
 const memberKey = (role, number) => {

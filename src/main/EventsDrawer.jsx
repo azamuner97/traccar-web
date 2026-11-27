@@ -50,7 +50,6 @@ const EventsDrawer = ({ open, onClose }) => {
 
   const events = useSelector((state) => state.events.items);
   const history = useSelector((state) => state.gameNotifications);
-  const user = useSelector((state) => state.session.user);
   const entries = mergeNotificationEntries(features.disableEvents ? [] : events, history.items);
   const [page, setPage] = useState(1);
   const pages = Math.max(1, Math.ceil(entries.length / 100));
@@ -63,13 +62,7 @@ const EventsDrawer = ({ open, onClose }) => {
   useEffect(() => {
     if (open) requestGameNotificationSync();
     const update = () => {
-      dispatch(
-        gameNotificationsActions.prune({
-          key: history.key,
-          user,
-          now: Date.now(),
-        }),
-      );
+      dispatch(gameNotificationsActions.prune({ key: history.key, now: Date.now() }));
       dispatch(
         gameNotificationsActions.setDrawerVisible({
           key: history.key,
@@ -83,7 +76,7 @@ const EventsDrawer = ({ open, onClose }) => {
       document.removeEventListener('visibilitychange', update);
       dispatch(gameNotificationsActions.setDrawerVisible({ key: history.key, visible: false }));
     };
-  }, [dispatch, history.key, open, user]);
+  }, [dispatch, history.key, open]);
 
   const formatType = (event) =>
     formatNotificationTitle(t, {

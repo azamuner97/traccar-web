@@ -11,13 +11,11 @@ import {
   isNotificationGeneration,
   retainGameNotificationHistory,
 } from './gameNotificationHistory.js';
+import createSyncSignal from '../common/util/syncSignal.js';
 
-const listeners = new Set();
-export const requestGameNotificationSync = () => listeners.forEach((listener) => listener());
-export const listenGameNotificationSync = (listener) => {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-};
+const notificationSync = createSyncSignal();
+export const requestGameNotificationSync = () => notificationSync.request();
+export const listenGameNotificationSync = notificationSync.listen;
 
 const ids = (value) => [
   ...new Set(

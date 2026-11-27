@@ -669,7 +669,6 @@
     "mapDrawingRectangle": "Draw rectangle",
     "mapDrawingCircle": "Draw circle",
     "mapDrawingText": "Add text",
-    "mapDrawingEditText": "Edit text",
     "mapDrawingProperties": "Drawing properties",
     "mapDrawingColor": "Drawing color",
     "mapDrawingDelete": "Delete drawing",

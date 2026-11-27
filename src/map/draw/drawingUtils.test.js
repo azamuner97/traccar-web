@@ -168,15 +168,10 @@ test('drawing values and permissions are normalized', () => {
   assert.equal(normalizeDrawingColor('red'), '#FF0000');
   assert.equal(normalizeDrawingText(`a\r\n${'x'.repeat(250)}`).length, 200);
   assert.equal(canEditDrawings({ disableDrawings: false, attributes: {} }), true);
-  // The game role comes from the membership of /api/game-status, never from user attributes.
+  // The game role comes from the membership of /api/game-status.
   assert.equal(
     canEditDrawings(withGameRole({ disableDrawings: false, attributes: {} }, 'spectator')),
     false,
-  );
-  assert.equal(
-    canEditDrawings({ disableDrawings: false, attributes: { traccarToolUserRole: 'spectator' } }),
-    true,
-    'user attributes carry no membership',
   );
   assert.equal(canEditDrawings(withGameRole({ disableDrawings: false }, 'hunter')), true);
   assert.equal(withGameRole(null, 'hunter'), null);
@@ -213,8 +208,8 @@ test('toolbar expansion is isolated by user and safely defaults to collapsed', (
 
 test('drawing erase modes are mutually exclusive and restrict eligible targets', () => {
   const user = { id: 7, administrator: true };
-  const own = { id: 1, ownerId: 7 };
-  const foreign = { id: 2, ownerId: 8 };
+  const own = { id: 1, ownerId: 7, canDelete: true };
+  const foreign = { id: 2, ownerId: 8, canDelete: true };
 
   assert.equal(nextDrawingDeleteMode(null, 'own'), 'own');
   assert.equal(nextDrawingDeleteMode('foreign', 'own'), 'own');
@@ -224,7 +219,7 @@ test('drawing erase modes are mutually exclusive and restrict eligible targets',
   assert.equal(canDeleteDrawingInMode('own', foreign, user), false);
   assert.equal(canDeleteDrawingInMode('foreign', own, user), false);
   assert.equal(canDeleteDrawingInMode('foreign', foreign, user), true);
-  assert.equal(canDeleteDrawingInMode('foreign', foreign, { id: 7, administrator: false }), false);
+  assert.equal(canDeleteDrawingInMode('foreign', { ...foreign, canDelete: false }, user), false);
   assert.equal(canDeleteDrawingInMode(null, own, user), false);
 });
 
@@ -238,8 +233,7 @@ test('server capabilities authorize shared editing and deletion without trusting
   assert.equal(canDeleteDrawing({ ...shared, canDelete: false }, user), false);
   assert.equal(canEditDrawing(shared, { ...user, disableDrawings: true }), false);
   assert.equal(canDeleteDrawing(shared, withGameRole(user, 'spectator')), false);
-  assert.equal(canEditDrawing({ id: 10, ownerId: 8 }, user), false);
-  assert.equal(canDeleteDrawing({ id: 10, ownerId: 8 }, user), false);
-  assert.equal(canEditDrawing({ id: 10, ownerId: 7 }, user), true);
+  assert.equal(canEditDrawing({ id: 10, ownerId: 7 }, user), false, 'ownership grants nothing');
+  assert.equal(canDeleteDrawing({ id: 10, ownerId: 7 }, user), false, 'ownership grants nothing');
   assert.equal(canEditDrawing({ id: 10, ownerId: 7, canEdit: false }, user), false);
 });

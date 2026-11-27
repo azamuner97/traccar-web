@@ -1,7 +1,7 @@
 const ROLE_ATTRIBUTE = 'traccarToolRole';
 const ROLE_NUMBER_ATTRIBUTE = 'traccarToolRoleNumber';
 
-export const roleMarkerRoles = ['player', 'supporter', 'hunter'];
+const roleMarkerRoles = ['player', 'supporter', 'hunter'];
 
 export const normalizePositiveInteger = (value) => {
   if (typeof value === 'number') {

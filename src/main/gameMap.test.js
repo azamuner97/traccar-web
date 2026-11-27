@@ -54,11 +54,11 @@ const game = (role, number, caught = [], changes = {}) => ({
 const visible = (filterUser, filterGame) =>
   Object.keys(filterLiveDevices(devices, gameMapFilter(filterUser, filterGame)));
 
-test('participant identity uses role markers and never numeric category fallback', () => {
+test('participant identity uses role markers', () => {
   assert.equal(participantKey(devices[11]), 'player:1');
   assert.equal(participantKey(devices[21]), 'supporter:2');
   assert.equal(participantKey(devices[31]), null);
-  assert.equal(participantKey({ category: '1', attributes: { traccarToolRole: 'player' } }), null);
+  assert.equal(participantKey({ attributes: { traccarToolRole: 'player' } }), null, 'no number');
   assert.equal(isMirrorDevice(devices[12]), true);
   assert.equal(isMirrorDevice(devices[11]), false);
 });
@@ -123,19 +123,6 @@ test('administrators and accounts without known membership see the map unfiltere
     all,
     'an invalid status names no membership',
   );
-});
-
-test('user attributes carry no membership', () => {
-  const legacy = {
-    ...user,
-    attributes: {
-      traccarToolUserRole: 'player',
-      traccarToolParticipantRole: 'player',
-      traccarToolParticipantNumber: 1,
-      traccarToolSessionDeviceId: 900,
-    },
-  };
-  assert.equal(gameMapFilter(legacy, { key: '5', status: null }), null);
 });
 
 test('malformed roster entries are ignored', () => {

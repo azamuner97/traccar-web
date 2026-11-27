@@ -4,8 +4,7 @@ import {
   isValidGameAlert,
   isLiveRecipientAudience,
 } from './gameAlerts.js';
-
-const positiveId = (value) => (Number.isSafeInteger(value) && value > 0 ? value : null);
+import { positiveId } from '../game/gameView.js';
 
 export const isNotificationGeneration = (value) =>
   typeof value === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(value);

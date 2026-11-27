@@ -1,9 +1,8 @@
-const subscribers = new Set();
-export const requestProximitySync = () => subscribers.forEach((listener) => listener());
-export const subscribeProximitySync = (listener) => {
-  subscribers.add(listener);
-  return () => subscribers.delete(listener);
-};
+import createSyncSignal from '../common/util/syncSignal.js';
+
+const proximitySync = createSyncSignal();
+export const requestProximitySync = () => proximitySync.request();
+export const subscribeProximitySync = proximitySync.listen;
 // Proximity is scoped by game-session membership (/api/game-status): hunters and the spectator read the circles
 // of their session, players and supporters their own temporary access to other participants' trackers.
 export const readsProximityCircles = (membership) =>

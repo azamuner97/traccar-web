@@ -10,7 +10,6 @@ import {
   fakePingNumbers,
   breakRequest,
   fakeRequest,
-  fakeUse,
   fakeUseAvailability,
   fillText,
   formatCountdown,
@@ -155,14 +154,6 @@ test('membership comes only from the computed status; players and supporters hol
   for (const changes of [{ role: 'operator' }, { memberId: 0 }, { gameSessionId: null }]) {
     assert.equal(gameMembership(user(), { key: '7', status: gameStatus('player', changes) }), null);
   }
-  const legacy = user({
-    attributes: {
-      traccarToolUserRole: 'player',
-      traccarToolSessionDeviceId: 900,
-      traccarToolAssignedDeviceId: 11,
-    },
-  });
-  assert.equal(gameMembership(legacy, { key: '7', status: null }), null, 'attributes are ignored');
   assert.deepEqual(['player', 'supporter', 'hunter', 'spectator'].map(holdsJokers), [
     true,
     true,
@@ -294,6 +285,7 @@ test('reservations: cancel held plans and armed fakes through delivery', () => {
         {
           id: 3,
           type: 'fakePing',
+          use: 'timetable',
           status: 'reserved',
           armed: true,
           fake: {
@@ -351,7 +343,7 @@ test('reservations: cancel held plans and armed fakes through delivery', () => {
   assert.deepEqual(
     view.map((item) => item.use),
     ['timetable', 'timetable', 'runningSpeedhunt', 'speedhunt', 'speedhunt'],
-    'the use comes from the server or from the plan',
+    'the use comes from the server',
   );
 });
 
@@ -933,11 +925,10 @@ test('fakes: valid requests only, ping numbers within the limit, one unbound spe
     speedhunt: { enabled: true, reason: null },
     runningSpeedhunt: { enabled: false, reason: 'noRunningHunt' },
   });
-  assert.equal(fakeUse({ entryId: 40 }), 'timetable');
-  assert.equal(fakeUse({ pingNumber: 2 }), 'speedhunt');
-  assert.equal(fakeUse({}), null);
   const [own] = reservationsView({
-    reservations: [{ id: 3, type: 'fakePing', armed: true, fake: { entryId: 40 } }],
+    reservations: [
+      { id: 3, type: 'fakePing', armed: true, use: 'timetable', fake: { entryId: 40 } },
+    ],
   });
   assert.equal(own.entryId, 40);
   assert.equal(own.use, 'timetable');

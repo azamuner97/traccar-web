@@ -1,5 +1,7 @@
+import { positiveId } from '../game/gameView.js';
+
 // Game alerts of data model 2. Who may receive an alert follows the membership that /api/game-status names
-// ({ userId, gameSessionId, memberId, role }), never user attributes: recipients and sources are members.
+// ({ userId, gameSessionId, memberId, role }): recipients and sources are members.
 const memberRoles = new Set(['player', 'supporter', 'hunter', 'spectator']);
 const targetedRoles = new Set(['player', 'supporter', 'hunter']);
 // The stable 'hunters' audience also includes spectators.
@@ -25,9 +27,6 @@ export const isLiveRecipientAudience = (audience) =>
   [...liveRecipientAudiences.values()].includes(audience);
 const alertMaxAgeMs = 15 * 60 * 1000;
 export const gameAlertDurationMs = 60000;
-
-const positiveId = (value) =>
-  typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : null;
 
 /**
  * What decides which retained alerts a member may keep: their role and member. A role change makes a new

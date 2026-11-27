@@ -11,7 +11,7 @@ import { gameActions, gameReducer } from './game.js';
 import { createGameNotificationsMiddleware } from './gameNotificationsMiddleware.js';
 const generation = '12345678-1234-1234-1234-123456789abc';
 const user = { id: 5, attributes: {} };
-// Membership comes from the computed game status, never from user attributes.
+// Membership comes from the computed game status.
 const status = (changes = {}) => ({
   gameSessionId: 3,
   memberId: 40,

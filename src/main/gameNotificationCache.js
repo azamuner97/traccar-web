@@ -1,4 +1,4 @@
-// Only the new authenticated journal is stored here. No localStorage migration.
+// The members' game notification journals, kept in memory and persisted to IndexedDB where it is available.
 export const createGameNotificationCache = (getDatabase = () => window.indexedDB) => {
   const memory = new Map();
   const writes = new Map();
@@ -86,6 +86,6 @@ export const createGameNotificationCache = (getDatabase = () => window.indexedDB
     writes.set(key, next);
     return next;
   };
-  return { load, save, remove, flush: () => Promise.all(writes.values()) };
+  return { load, save, remove };
 };
 export const gameNotificationCache = createGameNotificationCache();

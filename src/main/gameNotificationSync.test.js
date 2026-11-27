@@ -11,7 +11,7 @@ import { canReceiveGameAlert } from './gameAlerts.js';
 const generation = '12345678-1234-1234-1234-123456789abc';
 const replacement = '87654321-1234-1234-1234-123456789abc';
 const now = Date.parse('2026-10-11T12:00:00Z');
-// The membership /api/game-status names; user attributes play no part.
+// The membership /api/game-status names.
 const member = { userId: 5, gameSessionId: 3, memberId: 40, role: 'player', number: 1 };
 // A notification entry as the server returns it: no session, null members for session and role alerts.
 const item = (id, changes = {}) => ({
@@ -235,7 +235,7 @@ test('failures retain cached history and do not advance cursor', async () => {
   assert.equal(context.state().cursor, '1');
   assert.equal(context.state().error, 'Offline');
 });
-test('blocked/corrupt storage falls back to memory without legacy loading', async () => {
+test('blocked/corrupt storage falls back to memory', async () => {
   const cache = createGameNotificationCache(() => {
     throw new Error('Denied');
   });
@@ -266,7 +266,7 @@ test('cancelled/account-changed responses cannot update state', async () => {
   await waiting;
   assert.equal(context.state().key, null);
 });
-test('malformed pages, another session and legacy types fail closed', () => {
+test('malformed pages, another session and unknown audiences fail closed', () => {
   const valid = page([item('one')]);
   const checked = validateNotificationPage(valid, member, now);
   assert.equal(checked.items[0].gameSessionId, 3, 'items are stamped with the requested session');
@@ -275,7 +275,7 @@ test('malformed pages, another session and legacy types fail closed', () => {
   for (const changes of [
     { generation: 'invalid' },
     { generation: null },
-    { items: [item('one', { audience: 'participants' })] },
+    { items: [item('one', { audience: 'everyone' })] },
     { items: [item('one', { generation: replacement })] },
     { items: [item('one', { recipientMemberId: 40 })] },
     { items: 'none' },

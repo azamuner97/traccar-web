@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useState } from 'react';
+import { useEffect, useReducer } from 'react';
 import { useSelector } from 'react-redux';
 import { useMediaQuery, useTheme } from '@mui/material';
 import { map } from '../core/MapView';
@@ -9,6 +9,7 @@ import { createProximityCircle, proximityMinimumDiameter } from './proximityCirc
 import { proximityCircleLabel, validProximityCircle } from '../../main/gameProximity';
 import { gameMemberKey } from '../../game/gameView';
 import useGameMembership from '../../game/useGameMembership';
+import useNow from '../../game/useNow';
 
 const MapParticipantProximity = () => {
   const theme = useTheme();
@@ -17,11 +18,7 @@ const MapParticipantProximity = () => {
   const memberKey = gameMemberKey(useGameMembership());
   const proximity = useSelector((state) => state.gameProximity);
   const [viewportRevision, refreshViewport] = useReducer((value) => value + 1, 0);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(interval);
-  }, []);
+  const now = useNow();
   useEffect(() => {
     let frame;
     const update = () => {

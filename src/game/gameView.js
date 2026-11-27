@@ -1,7 +1,9 @@
 // The Game page's view of the server's member endpoints of game data model 2: /api/game-status,
 // /api/game-requests, /api/game-jokers and /api/game-timetable. Everything here is derived from what the
 // server already computed and filtered for the signed-in member; nothing is inferred about other participants.
-// Membership (session, member, role and number) comes only from /api/game-status, never from user attributes.
+// Membership (session, member, role and number) comes only from /api/game-status.
+
+import createSyncSignal from '../common/util/syncSignal.js';
 
 const gameRoles = new Set(['player', 'supporter', 'hunter', 'spectator']);
 
@@ -13,7 +15,7 @@ export const JOKER_REQUESTS = {
 };
 // All three uses draw from the same fake-ping inventory.
 export const FAKE_USES = ['timetable', 'speedhunt', 'runningSpeedhunt'];
-export const OPEN_REQUEST_STATES = new Set(['pending', 'approved', 'executing']);
+const OPEN_REQUEST_STATES = new Set(['pending', 'approved', 'executing']);
 export const GAME_INVALIDATIONS = ['game-status', 'game-requests', 'game-jokers', 'game-timetable'];
 export const SPEEDHUNT_HISTORY_INVALIDATION = 'game-speedhunt-history';
 export const SPEEDHUNT_PINGS = ['speedhuntStaticPing', 'speedhuntLivePing'];
@@ -25,9 +27,9 @@ export const SPEEDHUNT_REQUESTS = [
 // The highest ping a speedhunt fake may name when speedhunts have no ping limit.
 export const MAX_FAKE_PING_NUMBER = 1000;
 // The server's GameTimetableService.FAKE_CUTOFF_SECONDS: a fake needs a ping more than this far ahead.
-export const FAKE_CUTOFF_MS = 15000;
+const FAKE_CUTOFF_MS = 15000;
 
-const positiveId = (value) => (Number.isSafeInteger(value) && value > 0 ? value : null);
+export const positiveId = (value) => (Number.isSafeInteger(value) && value > 0 ? value : null);
 
 /**
  * The account whose game data the store holds: every signed-in account except administrators, who operate
@@ -69,29 +71,28 @@ export const holdsJokers = (role) => role === 'player' || role === 'supporter';
 /** Players and supporters read their own jokers; hunters read the speedhunt jokers of their shared pool. */
 export const readsJokers = (role) => holdsJokers(role) || role === 'hunter';
 
+const count = (value) => (Number.isSafeInteger(value) && value > 0 ? value : 0);
+
+const inventoryCounts = (item) => ({
+  granted: count(item?.granted),
+  used: count(item?.used),
+  reserved: count(item?.reserved),
+  available: count(item?.available),
+  overAllocated: count(item?.overAllocated),
+});
+
 /** The hunters' shared pool of speedhunt jokers, or null when it was not read. */
 export const speedhuntPoolView = (jokers) => {
   const item = (Array.isArray(jokers?.inventories) ? jokers.inventories : []).find(
     (inventory) => inventory?.type === 'speedhunt',
   );
-  if (!item) return null;
-  const count = (value) => (Number.isSafeInteger(value) && value > 0 ? value : 0);
-  return {
-    granted: count(item.granted),
-    used: count(item.used),
-    reserved: count(item.reserved),
-    available: count(item.available),
-    overAllocated: count(item.overAllocated),
-  };
+  return item ? inventoryCounts(item) : null;
 };
 
-const listeners = new Set();
+const gameSync = createSyncSignal();
 /** Ask game listeners to refresh, optionally naming the resources invalidated by the socket. */
-export const requestGameSync = (resources) => listeners.forEach((listener) => listener(resources));
-export const listenGameSync = (listener) => {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-};
+export const requestGameSync = (resources) => gameSync.request(resources);
+export const listenGameSync = gameSync.listen;
 
 export const isGameInvalidation = (resources) =>
   Array.isArray(resources) &&
@@ -100,7 +101,7 @@ export const isGameInvalidation = (resources) =>
       GAME_INVALIDATIONS.includes(resource) || resource === SPEEDHUNT_HISTORY_INVALIDATION,
   );
 
-export const parseTime = (value) => {
+const parseTime = (value) => {
   const time = typeof value === 'string' ? Date.parse(value) : NaN;
   return Number.isFinite(time) ? time : null;
 };
@@ -168,7 +169,7 @@ export const formatCountdown = (milliseconds) => {
 
 /**
  * The member's own break: none, active until its deadline, or ending once the deadline has passed while
- * the Tool has not published its end yet (for example while no Tool controls the game).
+ * the status read last has not reported its end yet (for example while the game is stopped).
  */
 export const breakView = (published, offsetMs, now = Date.now()) => {
   if (!published || published.active !== true) return { state: 'none' };
@@ -191,39 +192,18 @@ export const connectionState = ({ socket, loaded, error, running }) => {
   return running ? 'running' : 'stopped';
 };
 
-const count = (value) => (Number.isSafeInteger(value) && value > 0 ? value : 0);
-
 /** The member's jokers per type; types without an inventory count as zero. */
 export const inventoryByType = (jokers) => {
-  const result = Object.fromEntries(
-    JOKER_TYPES.map((type) => [
-      type,
-      { granted: 0, used: 0, reserved: 0, available: 0, overAllocated: 0 },
-    ]),
-  );
+  const result = Object.fromEntries(JOKER_TYPES.map((type) => [type, inventoryCounts(null)]));
   for (const item of Array.isArray(jokers?.inventories) ? jokers.inventories : []) {
     if (result[item?.type]) {
-      result[item.type] = {
-        granted: count(item.granted),
-        used: count(item.used),
-        reserved: count(item.reserved),
-        available: count(item.available),
-        overAllocated: count(item.overAllocated),
-      };
+      result[item.type] = inventoryCounts(item);
     }
   }
   return result;
 };
 
 const finite = (value) => (Number.isFinite(value) ? value : null);
-
-/** How a fake ping is used: on a timetable ping (entryId) or on the next speedhunt (pingNumber). */
-export const fakeUse = (plan) => {
-  if (Number.isSafeInteger(plan?.entryId)) return 'timetable';
-  if (Number.isSafeInteger(plan?.pingNumber))
-    return plan.runToken ? 'runningSpeedhunt' : 'speedhunt';
-  return null;
-};
 
 /**
  * The run token of each own armed fake on a running speedhunt, by reservation: /api/game-jokers does not name
@@ -246,7 +226,7 @@ export const ownFakeRunTokens = (status) =>
  * speedhunt fake bound to a speedhunt (used). An armed plan or one held by a cancellable request can be
  * cancelled.
  */
-export const reservationView = (reservation, cancellableRequestIds, runTokens = new Map()) => {
+const reservationView = (reservation, cancellableRequestIds, runTokens = new Map()) => {
   const fake = reservation?.fake && typeof reservation.fake === 'object' ? reservation.fake : {};
   const plannedBreak =
     reservation?.plannedBreak && typeof reservation.plannedBreak === 'object'
@@ -261,7 +241,7 @@ export const reservationView = (reservation, cancellableRequestIds, runTokens = 
     reservation?.type === 'break' && parseTime(plannedBreak.startsAt) !== null
       ? plannedBreak.startsAt
       : null;
-  const use = FAKE_USES.includes(reservation?.use) ? reservation.use : fakeUse(fake);
+  const use = FAKE_USES.includes(reservation?.use) ? reservation.use : null;
   const cancellable =
     kind === 'armed' ||
     (kind === 'held' &&
@@ -448,7 +428,7 @@ export const participantsView = (status, offsetMs, now = Date.now()) =>
           running: speedhunt.running === true,
           pings: Number.isSafeInteger(speedhunt.pings) ? speedhunt.pings : 0,
           pingHistory: speedhunt.pingHistory,
-          startsRun: speedhunt.startsRun ?? (speedhunt.running !== true && !speedhunt.pings),
+          startsRun: speedhunt.startsRun === true,
           live: speedhunt.live === true,
           liveUntil: typeof speedhunt.liveUntil === 'string' ? speedhunt.liveUntil : null,
           revision: Number.isSafeInteger(speedhunt.revision) ? speedhunt.revision : null,
@@ -458,15 +438,15 @@ export const participantsView = (status, offsetMs, now = Date.now()) =>
     })
     .sort((a, b) => Number(a.caught) - Number(b.caught) || a.name.localeCompare(b.name));
 
-/**
- * Which shared speedhunt actions a hunter can request for a participant, mirroring the Tool's checks;
- * the Tool and the server decide.
- */
 export const fixedLiveMinutes = (limits) => {
   const minutes = limits?.fixedLiveMinutes;
   return Number.isFinite(minutes) && minutes > 0 ? minutes : null;
 };
 
+/**
+ * Which shared speedhunt actions a hunter can request for a participant, mirroring the Tool's checks;
+ * the Tool and the server decide.
+ */
 export const speedhuntActions = (
   participant,
   { requests, running, lastSpeedhuntMemberId, limits, pool = null },

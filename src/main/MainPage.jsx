@@ -117,11 +117,6 @@ const MainPage = () => {
   const onEventsClick = useCallback(() => setEventsOpen(true), [setEventsOpen]);
 
   useEffect(() => {
-    window.localStorage.removeItem('deviceFilter');
-    window.localStorage.removeItem('filterMap');
-  }, []);
-
-  useEffect(() => {
     if (!desktop && mapOnSelect && selectedDeviceId) {
       setDevicesOpen(false);
     }

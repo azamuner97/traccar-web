@@ -9,7 +9,7 @@ import {
 import { canReceiveGameAlert, isValidGameAlert } from './gameAlerts.js';
 import { sessionActions, sessionReducer } from '../store/session.js';
 
-// The membership /api/game-status names; user attributes play no part.
+// The membership /api/game-status names.
 const member = (role, changes = {}) => ({
   userId: 111,
   gameSessionId: 3,

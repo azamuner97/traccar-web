@@ -1,5 +1,5 @@
 export const LONG_PRESS_DELAY = 500;
-export const LONG_PRESS_TOLERANCE = 10;
+const LONG_PRESS_TOLERANCE = 10;
 export const CLICK_SUPPRESSION_WINDOW = 1000;
 
 const distance = (first, second) => Math.hypot(second.x - first.x, second.y - first.y);

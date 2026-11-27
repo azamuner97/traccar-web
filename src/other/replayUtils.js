@@ -1,4 +1,4 @@
-export const MAX_REPLAY_DEVICES = 50;
+const MAX_REPLAY_DEVICES = 50;
 export const MAX_REPLAY_RANGE = 48 * 60 * 60 * 1000;
 export const REPLAY_POSITION_LIFETIME = 2 * 60 * 1000;
 export const REPLAY_SPEEDS = [1, 10, 100, 1000];

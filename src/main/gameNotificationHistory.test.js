@@ -8,7 +8,7 @@ import {
   mergeNotificationEntries,
 } from './gameNotificationHistory.js';
 const generation = '12345678-1234-1234-1234-123456789abc';
-// The membership /api/game-status names; user attributes play no part.
+// The membership /api/game-status names.
 const member = { userId: 5, gameSessionId: 3, memberId: 40, role: 'hunter', number: 1 };
 const now = Date.parse('2026-10-11T12:00:00Z');
 const alert = (changes = {}) => ({
@@ -37,7 +37,7 @@ test('history validates audience, generation and schema and strips unknown metad
       alert({ id: 'wrong', generation: 'different' }),
       alert({ id: 'other', gameSessionId: 4 }),
       alert({ id: 'unstamped', gameSessionId: undefined }),
-      alert({ id: 'legacy', audience: 'participants' }),
+      alert({ id: 'unknown', audience: 'everyone' }),
       alert({ id: 'bad', read: 1 }),
     ],
     member,

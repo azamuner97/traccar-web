@@ -31,7 +31,7 @@ export const loadDrawingVisibility = (storage, userId) =>
 export const loadDrawingToolbarExpanded = (storage, userId) =>
   storage.getItem(drawingToolbarExpandedKey(userId)) === 'true';
 
-export const transformDrawingGeometry = (geometry, transform) => {
+const transformDrawingGeometry = (geometry, transform) => {
   const transformCoordinates = (coordinates) => {
     if (
       Array.isArray(coordinates) &&
@@ -199,25 +199,16 @@ export const canDeleteDrawingInMode = (mode, drawing, user) => {
   return false;
 };
 
-/**
- * The signed-in account with its game role (`gameRole`), which comes from the membership of /api/game-status
- * and never from user attributes; null without membership.
- */
+/** The signed-in account with its game role (`gameRole`) from /api/game-status; null without membership. */
 export const withGameRole = (user, role) => (user ? { ...user, gameRole: role ?? null } : user);
 
 /** Spectators only watch: they draw nothing. The server decides the sharing of each drawing. */
 export const canEditDrawings = (user) =>
   Boolean(user?.administrator || (!user?.disableDrawings && user?.gameRole !== 'spectator'));
 
-export const canEditDrawing = (drawing, user) => {
-  if (!drawing || !user || !canEditDrawings(user)) return false;
-  if (typeof drawing.canEdit === 'boolean') return drawing.canEdit;
-  // An older server never grants group editing through missing capabilities.
-  return drawing.ownerId === user.id;
-};
+/** The server computes each drawing's capabilities (`canEdit`, `canDelete`) for the signed-in account. */
+export const canEditDrawing = (drawing, user) =>
+  Boolean(drawing && user && canEditDrawings(user) && drawing.canEdit === true);
 
-export const canDeleteDrawing = (drawing, user) => {
-  if (!drawing || !user || !canEditDrawings(user)) return false;
-  if (typeof drawing.canDelete === 'boolean') return drawing.canDelete;
-  return Boolean(user.administrator || drawing.ownerId === user.id);
-};
+export const canDeleteDrawing = (drawing, user) =>
+  Boolean(drawing && user && canEditDrawings(user) && drawing.canDelete === true);

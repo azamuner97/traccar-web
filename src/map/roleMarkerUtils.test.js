@@ -3,15 +3,15 @@ import test from 'node:test';
 
 import { resolveRoleMarker, roleNumberTextSize } from './roleMarkerUtils.js';
 
-const device = (role, number, category = 'person') => ({
-  category,
+const device = (role, number) => ({
+  category: 'person',
   attributes: {
     traccarToolRole: role,
     ...(number !== undefined ? { traccarToolRoleNumber: number } : {}),
   },
 });
 
-test('resolves every supported role from the new attribute contract', () => {
+test('resolves every supported role from the role attributes', () => {
   for (const role of ['player', 'supporter', 'hunter']) {
     assert.deepEqual(resolveRoleMarker(device(role, 7)), {
       role,
@@ -22,15 +22,15 @@ test('resolves every supported role from the new attribute contract', () => {
   }
 });
 
-test('accepts positive integer strings and numbers above the legacy SVG range', () => {
+test('accepts positive integer strings and multi-digit numbers', () => {
   assert.equal(resolveRoleMarker(device('player', ' 27 ')).number, '27');
   assert.equal(resolveRoleMarker(device('hunter', 1234)).number, '1234');
   assert.equal(resolveRoleMarker(device('supporter', '00016')).number, '16');
 });
 
-test('requires the role-number attribute even when the device category is numeric', () => {
-  assert.equal(resolveRoleMarker(device('player', undefined, '15')), null);
-  assert.equal(resolveRoleMarker(device('player', '', '15')), null);
+test('requires the role-number attribute', () => {
+  assert.equal(resolveRoleMarker(device('player', undefined)), null);
+  assert.equal(resolveRoleMarker(device('player', '')), null);
 });
 
 test('rejects invalid roles and non-positive whole numbers', () => {

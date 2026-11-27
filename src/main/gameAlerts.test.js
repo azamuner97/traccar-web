@@ -11,7 +11,7 @@ import {
   closeGameAlertQueue,
 } from './gameAlerts.js';
 const now = Date.parse('2026-10-11T12:00:00Z');
-// The membership /api/game-status names (member 40 of game session 3); user attributes play no part.
+// The membership /api/game-status names (member 40 of game session 3).
 const member = (role = 'player', gameSessionId = 3, memberId = 40) => ({
   userId: 5,
   gameSessionId,
@@ -56,9 +56,9 @@ test('the permission key follows role and member', () => {
     gameAlertPermissionKey(member('player', 3, 41)),
   );
 });
-test('schema rejects legacy audiences, unknown types, invalid fields and timezones', () => {
+test('schema rejects unknown audiences, unknown types, invalid fields and timezones', () => {
   for (const changes of [
-    { audience: 'participants' },
+    { audience: 'everyone' },
     { type: 'constructor' },
     { id: '' },
     { message: '' },
